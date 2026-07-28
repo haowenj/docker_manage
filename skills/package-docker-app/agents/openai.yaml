@@ -1,0 +1,4 @@
+interface:
+  display_name: "Package Docker App"
+  short_description: "Build portable Docker deployment archives"
+  default_prompt: "Use $package-docker-app to inspect this project and build a portable Docker deployment archive."
