@@ -50,7 +50,9 @@ def test_docker_mutation_failure_has_stage_hint_and_full_stderr(
 
     error = caught.value
     assert error.stage is Stage.CONFIRMED
-    assert error.hint and operation in error.hint.lower()
+    assert error.hint and f"Docker {operation}" in error.hint
+    assert "请检查" in error.hint
     assert error.details == stderr
     assert stderr not in error.message
     assert expected_command in error.message
+    assert "操作失败" in error.message

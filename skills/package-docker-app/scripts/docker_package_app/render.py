@@ -44,10 +44,10 @@ def render_deployment(
     for service, config in data["services"].items():
         image = image_plans.get(service)
         if image is None:
-            raise PackageError(f"deployment plan has no image for service {service}")
+            raise PackageError(f"部署计划没有为服务 {service} 指定镜像")
         if image.platform != plan.platform:
             raise PackageError(
-                f"service {service} image platform {image.platform} does not match {plan.platform}"
+                f"服务 {service} 的镜像平台 {image.platform} 与 {plan.platform} 不匹配"
             )
         config.pop("build", None)
         config["image"] = image.final_image
@@ -137,8 +137,8 @@ def validate_deployment(
     output = f"{result.stdout}\n{result.stderr}".lower()
     if "variable is not set" in output:
         raise PackageError(
-            "deployment Compose validation reported an unset variable",
-            hint="Add the missing variable to the generated deployment environment.",
+            "部署 Compose 校验发现未设置的变量",
+            hint="请把缺失变量加入生成的部署环境变量文件。",
             details=(result.stderr or result.stdout).strip(),
         )
 

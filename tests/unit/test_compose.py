@@ -79,5 +79,5 @@ def test_compose_dump_is_structurally_readable(tmp_path: Path) -> None:
 def test_compose_rejects_non_mapping_services(tmp_path: Path) -> None:
     runner = ComposeRunner({"services": []})
 
-    with pytest.raises(UsageError, match="services"):
+    with pytest.raises(UsageError, match="services 映射"):
         ComposeDocument.load(tmp_path, [tmp_path / "compose.yaml"], [], runner)

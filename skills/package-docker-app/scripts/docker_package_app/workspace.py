@@ -28,7 +28,7 @@ class WorkPaths:
     @classmethod
     def create(cls, project_root: Path, run_id: str) -> WorkPaths:
         if not RUN_ID_PATTERN.fullmatch(run_id):
-            raise ValueError(f"invalid run ID: {run_id!r}")
+            raise ValueError(f"运行 ID 无效：{run_id!r}")
 
         project = project_root.resolve()
         root = project / ".docker-manage"
@@ -90,6 +90,6 @@ def cleanup_run(paths: WorkPaths) -> None:
     work = paths.work.resolve(strict=False)
     root = paths.root.resolve(strict=False)
     if run.parent != work or work.parent != root or run == work:
-        raise ValueError(f"refusing to clean unsafe run path: {run}")
+        raise ValueError(f"拒绝清理不安全的运行路径：{run}")
     if run.exists():
         shutil.rmtree(run)

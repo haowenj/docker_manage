@@ -97,7 +97,7 @@ def test_same_container_name_gets_service_prefixed_artifact_keys(tmp_path: Path)
 
 
 def test_duplicate_host_port_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(PlanValidationError, match="host port"):
+    with pytest.raises(PlanValidationError, match="主机端口"):
         build_plan(
             _inspection(tmp_path, collision=True),
             _answers(collision=True),

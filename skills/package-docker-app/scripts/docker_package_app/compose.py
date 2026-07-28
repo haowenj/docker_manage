@@ -21,9 +21,9 @@ class ComposeDocument:
     ) -> None:
         services = data.get("services")
         if not isinstance(services, dict):
-            raise UsageError("Compose document must contain a services mapping")
+            raise UsageError("Compose 文档必须包含 services 映射")
         if not all(isinstance(name, str) and isinstance(value, dict) for name, value in services.items()):
-            raise UsageError("every Compose service must be a mapping with a string name")
+            raise UsageError("每个 Compose 服务都必须使用字符串名称和映射配置")
         self.project_root = project_root.resolve()
         self.files = tuple(Path(path).resolve() for path in files)
         self.data = copy.deepcopy(data)
@@ -49,11 +49,11 @@ class ComposeDocument:
             data = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise UsageError(
-                "Docker Compose returned invalid JSON",
+                "Docker Compose 返回了无效的 JSON",
                 details=result.stdout,
             ) from exc
         if not isinstance(data, dict):
-            raise UsageError("Docker Compose configuration must be an object")
+            raise UsageError("Docker Compose 配置必须是一个对象")
         return cls(root, data, resolved_files)
 
     @classmethod
@@ -95,5 +95,5 @@ class ComposeDocument:
         )
         parsed = yaml.safe_load(rendered)
         if parsed != self.data:
-            raise UsageError("rendered Compose YAML changed the document structure")
+            raise UsageError("渲染后的 Compose YAML 改变了文档结构")
         path.write_text(rendered, encoding="utf-8")

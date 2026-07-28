@@ -70,11 +70,11 @@ def build_manifest(
         item = metadata_by_reference.get(reference)
         if item is None:
             raise ArtifactVerificationError(
-                f"missing inspected metadata for packaged image {reference}"
+                f"待打包镜像缺少已检查的元数据：{reference}"
             )
         if item.platform != plan.platform:
             raise ArtifactVerificationError(
-                f"packaged image {reference} platform {item.platform} does not match {plan.platform}"
+                f"待打包镜像 {reference} 的平台 {item.platform} 与 {plan.platform} 不匹配"
             )
         packaged.append(
             PackagedImage(
@@ -139,7 +139,7 @@ def write_checksums(payload_root: Path) -> Path:
     lines: list[str] = []
     for relative, path in entries:
         if "\n" in relative or "\r" in relative:
-            raise ArtifactVerificationError(f"unsafe newline in payload path: {relative!r}")
+            raise ArtifactVerificationError(f"制品载荷路径包含不安全的换行符：{relative!r}")
         lines.append(f"{_sha256(path)}  {relative}\n")
     destination = root / "checksums.sha256"
     _atomic_write_text(destination, "".join(lines))
@@ -151,7 +151,7 @@ def verify_payload(payload_root: Path, checksums_path: Path) -> None:
     _validate_payload_tree(root)
     checksums = checksums_path.resolve()
     if checksums.parent != root or not checksums.is_file():
-        raise ArtifactVerificationError("checksum file must be a regular payload-root file")
+        raise ArtifactVerificationError("校验和文件必须是载荷根目录中的普通文件")
 
     expected_files = {
         relative: path
@@ -171,7 +171,7 @@ def verify_payload(payload_root: Path, checksums_path: Path) -> None:
             or relative in declared
         ):
             raise ArtifactVerificationError(
-                f"invalid checksum entry on line {line_number}"
+                f"第 {line_number} 行的校验和条目无效"
             )
         declared[relative] = digest
 
@@ -179,12 +179,12 @@ def verify_payload(payload_root: Path, checksums_path: Path) -> None:
         missing = sorted(set(expected_files) - set(declared))
         unexpected = sorted(set(declared) - set(expected_files))
         raise ArtifactVerificationError(
-            f"checksum file inventory mismatch: missing={missing}, unexpected={unexpected}"
+            f"校验和文件清单不匹配：缺少={missing}，多余={unexpected}"
         )
     for relative, expected in declared.items():
         actual = _sha256(expected_files[relative])
         if actual != expected:
-            raise ArtifactVerificationError(f"checksum mismatch for {relative}")
+            raise ArtifactVerificationError(f"文件 {relative} 的校验和不匹配")
 
 
 def create_verified_archive(payload_root: Path, destination: Path) -> Path:
@@ -210,7 +210,7 @@ def create_verified_archive(payload_root: Path, destination: Path) -> Path:
         if isinstance(exc, ArtifactVerificationError):
             raise
         raise ArtifactVerificationError(
-            f"unable to create verified archive: {exc}"
+            f"无法创建已验证的归档：{exc}"
         ) from exc
     finally:
         if partial.exists():
@@ -225,39 +225,39 @@ def _verify_archive(archive_path: Path, payload_root: Path) -> None:
             for member in archive.getmembers():
                 if not _safe_member_name(member.name) or member.name in seen:
                     raise ArtifactVerificationError(
-                        f"unsafe or duplicate archive member: {member.name!r}"
+                        f"归档成员不安全或重复：{member.name!r}"
                     )
                 seen.add(member.name)
                 source = expected.get(member.name)
                 if source is None:
                     raise ArtifactVerificationError(
-                        f"unexpected archive member: {member.name}"
+                        f"归档包含意外成员：{member.name}"
                     )
                 if member.ischr() or member.isblk() or member.isfifo() or member.isdev():
                     raise ArtifactVerificationError(
-                        f"unsafe archive member type: {member.name}"
+                        f"归档成员类型不安全：{member.name}"
                     )
                 if member.issym() or member.islnk():
                     if not _safe_link_target(member):
                         raise ArtifactVerificationError(
-                            f"archive symlink escapes payload: {member.name}"
+                            f"归档符号链接指向载荷之外：{member.name}"
                         )
                     continue
                 if member.isfile():
                     extracted = archive.extractfile(member)
                     if extracted is None:
                         raise ArtifactVerificationError(
-                            f"unable to read archive member: {member.name}"
+                            f"无法读取归档成员：{member.name}"
                         )
                     if _sha256_file_object(extracted) != _sha256(source):
                         raise ArtifactVerificationError(
-                            f"archive checksum mismatch for {member.name}"
+                            f"归档成员 {member.name} 的校验和不匹配"
                         )
             if seen != set(expected):
                 missing = sorted(set(expected) - seen)
-                raise ArtifactVerificationError(f"archive members missing: {missing}")
+                raise ArtifactVerificationError(f"归档缺少成员：{missing}")
     except tarfile.TarError as exc:
-        raise ArtifactVerificationError(f"invalid archive: {exc}") from exc
+        raise ArtifactVerificationError(f"归档无效：{exc}") from exc
 
 
 def _regular_files(root: Path, excluded: set[str]) -> list[tuple[str, Path]]:
@@ -270,7 +270,7 @@ def _regular_files(root: Path, excluded: set[str]) -> list[tuple[str, Path]]:
 
 def _payload_entries(root: Path) -> list[tuple[str, Path]]:
     if not root.is_dir():
-        raise ArtifactVerificationError(f"payload root is not a directory: {root}")
+        raise ArtifactVerificationError(f"制品载荷根路径不是目录：{root}")
     entries: list[tuple[str, Path]] = []
     for current, directories, files in os.walk(root, followlinks=False):
         current_path = Path(current)
@@ -284,14 +284,14 @@ def _payload_entries(root: Path) -> list[tuple[str, Path]]:
 def _validate_payload_tree(root: Path) -> None:
     for relative, path in _payload_entries(root):
         if not _safe_member_name(relative):
-            raise ArtifactVerificationError(f"unsafe payload path: {relative!r}")
+            raise ArtifactVerificationError(f"制品载荷路径不安全：{relative!r}")
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode):
             target = path.resolve(strict=False)
             if not target.is_relative_to(root):
-                raise ArtifactVerificationError(f"symlink escapes payload: {relative}")
+                raise ArtifactVerificationError(f"符号链接指向制品载荷之外：{relative}")
         elif not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
-            raise ArtifactVerificationError(f"unsupported payload file type: {relative}")
+            raise ArtifactVerificationError(f"制品载荷文件类型不受支持：{relative}")
 
 
 def _sha256(path: Path) -> str:

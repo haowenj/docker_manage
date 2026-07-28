@@ -56,7 +56,7 @@ class DockerFileCandidates:
 def preflight(project_root: Path, runner: CommandRunner) -> PreflightReport:
     project = project_root.resolve()
     if not project.is_dir():
-        raise UsageError(f"project directory does not exist: {project}")
+        raise UsageError(f"项目目录不存在：{project}")
 
     docker = runner.run(
         [
@@ -79,7 +79,7 @@ def preflight(project_root: Path, runner: CommandRunner) -> PreflightReport:
 def discover_docker_files(project_root: Path) -> DockerFileCandidates:
     root = project_root.resolve()
     if not root.is_dir():
-        raise UsageError(f"project directory does not exist: {root}")
+        raise UsageError(f"项目目录不存在：{root}")
 
     dockerfiles = tuple(
         sorted(
@@ -108,7 +108,7 @@ def discover_docker_files(project_root: Path) -> DockerFileCandidates:
         try:
             document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError) as exc:
-            raise UsageError(f"unable to parse Compose candidate {path.name}: {exc}") from exc
+            raise UsageError(f"无法解析候选 Compose 文件 {path.name}：{exc}") from exc
         services = document.get("services", {}) if isinstance(document, dict) else {}
         if not isinstance(services, dict):
             continue

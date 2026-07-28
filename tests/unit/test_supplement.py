@@ -70,7 +70,7 @@ def test_generated_file_must_stay_in_generated_root(tmp_path: Path) -> None:
         ),
     )
 
-    with pytest.raises(SupplementValidationError, match="generated"):
+    with pytest.raises(SupplementValidationError, match="生成"):
         load_supplement(path, tmp_path, tmp_path / ".docker-manage/generated", {"web"})
 
 

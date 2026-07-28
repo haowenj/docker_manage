@@ -183,5 +183,5 @@ def test_validation_rejects_unset_variable_warning(tmp_path: Path) -> None:
         stderr='The "MISSING" variable is not set. Defaulting to a blank string.\n'
     )
 
-    with pytest.raises(PackageError, match="unset variable"):
+    with pytest.raises(PackageError, match="未设置的变量"):
         validate_deployment(tmp_path / "compose.yaml", tmp_path / ".env", runner)

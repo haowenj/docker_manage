@@ -239,7 +239,7 @@ def _dispatch(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int]:
         finally:
             if not args.keep_work and not preserve:
                 cleanup_run(paths)
-    raise UsageError(f"unknown command: {args.command}")
+    raise UsageError(f"未知命令：{args.command}")
 
 
 def _perform_inspect(
@@ -366,7 +366,7 @@ def _perform_inspect(
 def _perform_plan(args: argparse.Namespace, paths: WorkPaths) -> dict[str, Any]:
     state = load_model(paths.state, RunState)
     if state.stage is not Stage.INSPECTED or state.inspection is None:
-        raise UsageError(f"run {state.run_id} is not ready for planning")
+        raise UsageError(f"运行 {state.run_id} 尚未准备好进行规划")
     questions = build_questions(state.inspection)
     provided = _load_answers(args.answers)
     answers = _resolve_answers(
@@ -402,10 +402,10 @@ def _perform_plan(args: argparse.Namespace, paths: WorkPaths) -> dict[str, Any]:
 def _perform_package(args: argparse.Namespace, paths: WorkPaths) -> dict[str, Any]:
     state = load_model(paths.state, RunState)
     if state.stage is not Stage.PLANNED or state.plan is None or state.inspection is None:
-        raise UsageError(f"run {state.run_id} is not ready for packaging")
+        raise UsageError(f"运行 {state.run_id} 尚未准备好进行打包")
     expected_hash = _plan_hash(state.plan)
     if state.plan_hash != expected_hash or args.confirm_plan_hash != expected_hash:
-        raise PackageError("plan hash confirmation does not match the stored plan")
+        raise PackageError("计划哈希确认值与已保存的计划不匹配")
 
     state = _transition(state, Stage.CONFIRMED)
     atomic_write_model(paths.state, state)
@@ -494,13 +494,13 @@ def _preload_supplement(
     try:
         supplement = ModelSupplement.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValidationError, ValueError) as exc:
-        raise SupplementValidationError(f"invalid model supplement: {exc}") from exc
+        raise SupplementValidationError(f"模型补充文件无效：{exc}") from exc
     generated = generated_root.resolve()
     for item in supplement.generated_files:
         candidate = _resolve_project_path(project, item.path)
         if not candidate.is_relative_to(generated) or not candidate.is_file():
             raise SupplementValidationError(
-                f"generated file must exist under {generated}: {item.path}"
+                f"生成文件必须存在于 {generated} 之下：{item.path}"
             )
     return supplement
 
@@ -536,7 +536,7 @@ def _select_compose_files(
             if ".override." not in value
         ]
         if len(base) > 1:
-            raise UsageError("multiple Compose files found; select with --compose-file")
+            raise UsageError("发现多个 Compose 文件；请使用 --compose-file 选择")
         selected = base
         if base:
             selected.extend(
@@ -546,7 +546,7 @@ def _select_compose_files(
             )
     for path in selected:
         if not path.is_file():
-            raise UsageError(f"Compose file does not exist: {path}")
+            raise UsageError(f"Compose 文件不存在：{path}")
     return selected
 
 
@@ -566,7 +566,7 @@ def _resolve_service_dockerfiles(
             continue
         build = {"context": raw_build} if isinstance(raw_build, str) else raw_build
         if not isinstance(build, dict):
-            raise UsageError(f"invalid build configuration for service {service}")
+            raise UsageError(f"服务 {service} 的构建配置无效")
         context = _resolve_project_path(project, str(build.get("context", ".")))
         value = build.get("dockerfile", "Dockerfile")
         dockerfile = Path(str(value))
@@ -691,17 +691,17 @@ def _load_answers(path: Path | None) -> dict[str, str]:
     if path is None:
         return {}
     if not path.is_file():
-        raise AnswerRequired(f"missing answers file: {path}")
+        raise AnswerRequired(f"缺少答案文件：{path}")
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise UsageError(f"invalid answers file: {exc}") from exc
+        raise UsageError(f"答案文件无效：{exc}") from exc
     values = raw.get("values") if isinstance(raw, dict) and "values" in raw else raw
     if not isinstance(values, dict) or not all(
         isinstance(key, str) and isinstance(value, str)
         for key, value in values.items()
     ):
-        raise UsageError("answers file must contain a string-to-string values object")
+        raise UsageError("答案文件必须包含键和值均为字符串的 values 对象")
     return dict(values)
 
 
@@ -774,13 +774,15 @@ def _resolve_answers(
 def _read_environment_overrides(
     questions: Sequence[Question],
 ) -> dict[str, str]:
+    lines: list[str] = []
+    show_questions = True
     while True:
-        print("请设置环境变量，只输入需要修改的“序号: 值”。")
-        for line in format_environment_questions(questions):
-            print(line)
-        print("全部使用默认值请输入“无修改”；显式空值请使用 <EMPTY>。")
+        if show_questions:
+            print("请设置环境变量，只输入需要修改的“序号: 值”。")
+            for line in format_environment_questions(questions):
+                print(line)
+            print("全部使用默认值请输入“无修改”；显式空值请使用 <EMPTY>。")
 
-        lines: list[str] = []
         while True:
             raw = input("环境变量覆盖（空行结束）：")
             if raw == "":
@@ -790,8 +792,18 @@ def _read_environment_overrides(
                 break
         try:
             return parse_environment_overrides(questions, lines)
-        except (AnswerRequired, PackageError) as exc:
+        except AnswerRequired as exc:
             print(exc.message, file=sys.stderr)
+            lines = [
+                line for line in lines if line.strip() != NO_ENV_OVERRIDES
+            ]
+            print("请只补充上述缺失序号。")
+            show_questions = False
+        except PackageError as exc:
+            print(exc.message, file=sys.stderr)
+            lines.clear()
+            print("请重新输入环境变量覆盖项。")
+            show_questions = True
 
 
 def _store_initial(paths: WorkPaths, inspection: Inspection) -> None:
@@ -799,7 +811,7 @@ def _store_initial(paths: WorkPaths, inspection: Inspection) -> None:
     if paths.state.is_file():
         previous = load_model(paths.state, RunState)
         if previous.stage is not Stage.NEEDS_MODEL:
-            raise UsageError(f"run {previous.run_id} cannot be inspected again")
+            raise UsageError(f"运行 {previous.run_id} 不能再次检查")
     if previous is not None and inspection.stage is Stage.INSPECTED:
         state = _transition(previous, Stage.INSPECTED, inspection=inspection)
     else:
@@ -813,7 +825,7 @@ def _store_initial(paths: WorkPaths, inspection: Inspection) -> None:
 
 def _transition(state: RunState, stage: Stage, **updates: object) -> RunState:
     if stage not in ALLOWED_TRANSITIONS.get(state.stage, set()):
-        raise UsageError(f"invalid state transition: {state.stage.value} -> {stage.value}")
+        raise UsageError(f"状态转换无效：{state.stage.value} -> {stage.value}")
     return state.model_copy(update={"stage": stage, **updates})
 
 
@@ -837,14 +849,14 @@ def _paths(project: Path, run_id: str) -> WorkPaths:
 
 def _existing_paths(project: Path, run_id: str | None) -> WorkPaths:
     if not run_id:
-        raise UsageError("--run-id is required")
+        raise UsageError("必须提供 --run-id")
     paths = _paths(project, run_id)
     if not paths.state.is_file():
-        raise UsageError(f"run state does not exist: {run_id}")
+        raise UsageError(f"运行状态不存在：{run_id}")
     state = load_model(paths.state, RunState)
     inspection = state.inspection
     if inspection is not None and Path(inspection.project_root).resolve() != project:
-        raise UsageError("run state belongs to a different project")
+        raise UsageError("运行状态属于另一个项目")
     return paths
 
 
@@ -916,9 +928,9 @@ def _write_result(body: Mapping[str, Any], *, pretty: bool) -> None:
 def _write_error(error: PackageError) -> None:
     print(error.message, file=sys.stderr)
     if error.stage is not None:
-        print(f"stage: {error.stage.value}", file=sys.stderr)
+        print(f"阶段：{error.stage.value}", file=sys.stderr)
     if error.hint:
-        print(f"hint: {error.hint}", file=sys.stderr)
+        print(f"建议：{error.hint}", file=sys.stderr)
     if error.details:
         print(error.details, file=sys.stderr)
 

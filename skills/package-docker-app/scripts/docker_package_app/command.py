@@ -43,8 +43,8 @@ class CommandRunner:
             )
         except OSError as exc:
             raise PackageError(
-                f"unable to execute {shlex.join(command)}",
-                hint="Install the required command and ensure it is available on PATH.",
+                f"无法执行命令：{shlex.join(command)}",
+                hint="请安装所需命令，并确保可以从 PATH 中找到该命令。",
                 details=str(exc),
             ) from exc
 
@@ -56,9 +56,8 @@ class CommandRunner:
         )
         if check and result.returncode != 0:
             raise PackageError(
-                f"command failed ({result.returncode}): {shlex.join(command)}",
-                hint="Review the command error and retry after correcting the local environment.",
+                f"命令执行失败（退出码 {result.returncode}）：{shlex.join(command)}",
+                hint="请检查命令错误，修正本地环境后重试。",
                 details=result.stderr.strip() or result.stdout.strip(),
             )
         return result
-

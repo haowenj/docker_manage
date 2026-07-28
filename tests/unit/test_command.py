@@ -34,4 +34,5 @@ def test_runner_raises_structured_error_on_failure(
 
     assert caught.value.details == "daemon unavailable"
     assert "docker version" in caught.value.message
-
+    assert "命令执行失败" in caught.value.message
+    assert caught.value.hint and "请检查命令错误" in caught.value.hint

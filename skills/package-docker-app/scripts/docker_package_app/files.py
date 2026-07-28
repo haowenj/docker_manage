@@ -77,22 +77,22 @@ def materialize_files(
                 action = FileAction.COPY
             else:
                 raise AnswerRequired(
-                    f"decision required for external path {candidate.resolved_path}"
+                    f"外部路径需要明确处理决定：{candidate.resolved_path}"
                 )
         if action is FileAction.KEEP_SERVER_PATH:
             server_paths.add(candidate.resolved_path)
             continue
         if not candidate.inside_project or not candidate.project_path:
             raise PackageError(
-                f"cannot copy path outside project: {candidate.resolved_path}"
+                f"无法复制项目目录之外的路径：{candidate.resolved_path}"
             )
 
         source = Path(candidate.resolved_path)
         if not source.exists():
-            raise PackageError(f"local Compose dependency does not exist: {source}")
+            raise PackageError(f"本地 Compose 依赖不存在：{source}")
         destination = files_root / candidate.project_path
         if not destination.resolve(strict=False).is_relative_to(files_root):
-            raise PackageError(f"unsafe payload path: {candidate.project_path}")
+            raise PackageError(f"制品载荷路径不安全：{candidate.project_path}")
         if candidate.resolved_path not in copied_sources:
             _copy_dependency(source, destination)
             copied_sources.add(candidate.resolved_path)
@@ -187,4 +187,4 @@ def _validate_directory_symlinks(source: Path) -> None:
         if ".docker-manage" in path.parts or not path.is_symlink():
             continue
         if not path.resolve().is_relative_to(root):
-            raise PackageError(f"symlink escapes copied directory: {path}")
+            raise PackageError(f"符号链接指向复制目录之外：{path}")

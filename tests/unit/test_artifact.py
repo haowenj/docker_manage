@@ -127,7 +127,7 @@ def test_verifier_rejects_checksum_tampering(payload: Path) -> None:
     checksums = payload / "checksums.sha256"
     (payload / "compose.yaml").write_text("services:\n  changed: {}\n", encoding="utf-8")
 
-    with pytest.raises(ArtifactVerificationError, match="checksum"):
+    with pytest.raises(ArtifactVerificationError, match="校验和"):
         verify_payload(payload, checksums)
 
 
@@ -136,7 +136,7 @@ def test_archive_rejects_symlink_escape(payload: Path, tmp_path: Path) -> None:
     outside.write_text("secret", encoding="utf-8")
     (payload / "files/outside").symlink_to(outside)
 
-    with pytest.raises(ArtifactVerificationError, match="symlink"):
+    with pytest.raises(ArtifactVerificationError, match="符号链接"):
         create_verified_archive(payload, tmp_path / "bad.tar.gz")
     assert not (tmp_path / "bad.tar.gz").exists()
     assert not tuple(tmp_path.glob("bad.tar.gz.partial-*"))

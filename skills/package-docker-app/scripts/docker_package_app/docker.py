@@ -77,7 +77,7 @@ class DockerEngine:
         lines = [line for line in result.stdout.splitlines() if line.strip()]
         if len(lines) != len(images):
             raise PackageError(
-                f"Docker returned metadata for {len(lines)} of {len(images)} images"
+                f"Docker 仅返回了 {len(lines)}/{len(images)} 个镜像的元数据"
             )
         metadata: list[ImageMetadata] = []
         for reference, line in zip(images, lines, strict=True):
@@ -93,7 +93,7 @@ class DockerEngine:
                     size=int(raw["Size"]),
                 )
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise PackageError(f"invalid Docker image metadata for {reference}") from exc
+                raise PackageError(f"镜像 {reference} 的 Docker 元数据无效") from exc
             _verify_platform(item, expected_platform)
             metadata.append(item)
         return tuple(metadata)
@@ -108,9 +108,9 @@ class DockerEngine:
         free = shutil.disk_usage(output_dir).free
         if free < required:
             raise PackageError(
-                f"insufficient disk space for image export: required {required} bytes, "
-                f"free {free} bytes",
-                hint="Free disk space or move the project to a larger filesystem.",
+                f"导出镜像的磁盘空间不足：需要 {required} 字节，"
+                f"可用 {free} 字节",
+                hint="请释放磁盘空间，或把项目移动到容量更大的文件系统。",
             )
 
     def save(self, images: Sequence[str], output: Path) -> None:
@@ -134,9 +134,9 @@ class DockerEngine:
             self.runner.run(argv, env=env)
         except PackageError as exc:
             raise PackageError(
-                exc.message,
+                f"Docker {operation} 操作失败：{exc.message}",
                 stage=Stage.CONFIRMED,
-                hint=f"Review the Docker {operation} error and correct the local Docker environment.",
+                hint=f"请检查 Docker {operation} 错误并修正本地 Docker 环境。",
                 details=exc.details,
             ) from exc
 
@@ -161,11 +161,11 @@ def prepare_build_compose(
     for service, image_plan in image_plans.items():
         config = data["services"].get(service)
         if not isinstance(config, dict) or "build" not in config:
-            raise PackageError(f"planned build service is missing from Compose: {service}")
+            raise PackageError(f"计划构建的服务不在 Compose 中：{service}")
         raw_build = config["build"]
         build = {"context": raw_build} if isinstance(raw_build, str) else copy.deepcopy(raw_build)
         if not isinstance(build, dict):
-            raise PackageError(f"invalid build configuration for service {service}")
+            raise PackageError(f"服务 {service} 的构建配置无效")
         context_value = build.get("context", ".")
         context = Path(str(context_value))
         if not context.is_absolute():
@@ -186,7 +186,7 @@ def prepare_build_compose(
                 source = context / source
             source = source.resolve()
             if not source.is_file():
-                raise PackageError(f"Dockerfile does not exist for {service}: {source}")
+                raise PackageError(f"服务 {service} 的 Dockerfile 不存在：{source}")
             shutil.copy2(source, destination)
 
         _write_build_ignore(context, source, destination)
@@ -244,5 +244,5 @@ def _verify_platform(metadata: ImageMetadata, expected: str) -> None:
         actual_parts.append(metadata.variant)
     if actual_parts[:2] != parts[:2] or (len(parts) == 3 and actual_parts != parts):
         raise PackageError(
-            f"image {metadata.reference} platform {metadata.platform} does not match {expected}"
+            f"镜像 {metadata.reference} 的平台 {metadata.platform} 与 {expected} 不匹配"
         )

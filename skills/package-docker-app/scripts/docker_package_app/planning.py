@@ -47,7 +47,7 @@ def build_plan(
             if answers.values.get(expose_id) == "no":
                 continue
         if question_id not in answers.values:
-            raise AnswerRequired(f"missing answer for {question_id}")
+            raise AnswerRequired(f"缺少答案：{question_id}")
 
     environment = _build_environment(inspection, answers)
     build_args = tuple(
@@ -132,9 +132,9 @@ def _build_ports(
             try:
                 host_port = int(answers.values[f"{prefix}.host"])
             except ValueError as exc:
-                raise PlanValidationError(f"invalid host port for {prefix}") from exc
+                raise PlanValidationError(f"{prefix} 的主机端口无效") from exc
             if not 1 <= host_port <= 65535:
-                raise PlanValidationError(f"invalid host port for {prefix}: {host_port}")
+                raise PlanValidationError(f"{prefix} 的主机端口无效：{host_port}")
         assignment = PortAssignment(
             service=item.service,
             container_port=item.container_port,
@@ -148,8 +148,8 @@ def _build_ports(
             for previous in exposed:
                 if _ports_conflict(previous, assignment):
                     raise PlanValidationError(
-                        f"host port conflict: {previous.service} and {assignment.service} "
-                        f"both use {host_port}/{assignment.protocol}"
+                        f"主机端口冲突：{previous.service} 和 {assignment.service} "
+                        f"都使用 {host_port}/{assignment.protocol}"
                     )
             exposed.append(assignment)
     return tuple(assignments)
@@ -176,12 +176,12 @@ def _build_images(
             )
             continue
         if not item.image:
-            raise PlanValidationError(f"service {item.service} has neither build nor image")
+            raise PlanValidationError(f"服务 {item.service} 既没有 build 也没有 image")
         decision = answers.values[f"image.{item.service}.decision"]
         action = ImageAction.PACKAGE if decision == "打包" else ImageAction.REUSE
         final_image = item.image if action is ImageAction.PACKAGE else decision
         if not IMAGE_PATTERN.fullmatch(final_image):
-            raise PlanValidationError(f"invalid image reference for {item.service}: {final_image}")
+            raise PlanValidationError(f"服务 {item.service} 的镜像引用无效：{final_image}")
         assignments.append(
             ImageAssignment(
                 service=item.service,
@@ -217,7 +217,7 @@ def _build_files(
             continue
         decision = answers.values[_file_question_id(str(path))]
         if decision == "abort":
-            raise PlanValidationError(f"packaging aborted for external path {path}")
+            raise PlanValidationError(f"已因外部路径中止打包：{path}")
         assignments.append(
             FileAssignment(
                 service=item.service,
@@ -238,11 +238,11 @@ def _ports_conflict(left: PortAssignment, right: PortAssignment) -> bool:
 
 def _validate_identity(app_name: str, version: str, platform: str) -> None:
     if not NAME_PATTERN.fullmatch(app_name):
-        raise PlanValidationError(f"invalid application name: {app_name}")
+        raise PlanValidationError(f"应用名称无效：{app_name}")
     if not TAG_PATTERN.fullmatch(version):
-        raise PlanValidationError(f"invalid version tag: {version}")
+        raise PlanValidationError(f"版本标签无效：{version}")
     if not PLATFORM_PATTERN.fullmatch(platform):
-        raise PlanValidationError(f"invalid target platform: {platform}")
+        raise PlanValidationError(f"目标平台无效：{platform}")
 
 
 def _env_component(value: str) -> str:

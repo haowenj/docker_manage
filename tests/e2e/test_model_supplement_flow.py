@@ -79,7 +79,7 @@ def test_missing_docker_files_are_generated_only_in_tool_directory(
                 "ambiguities": [
                     {
                         "id": "startup.web",
-                        "prompt": "Choose the web startup command",
+                        "prompt": "请选择 web 服务的启动命令",
                         "choices": ["python app.py", "python -m app"],
                     }
                 ],

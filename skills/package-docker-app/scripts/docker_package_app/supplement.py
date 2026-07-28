@@ -54,7 +54,7 @@ def load_supplement(
     try:
         supplement = ModelSupplement.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValidationError, ValueError) as exc:
-        raise SupplementValidationError(f"invalid model supplement: {exc}") from exc
+        raise SupplementValidationError(f"模型补充文件无效：{exc}") from exc
 
     project = project_root.resolve()
     generated = generated_root.resolve()
@@ -62,21 +62,21 @@ def load_supplement(
         candidate = _resolve_from_project(project, item.path)
         if not candidate.is_relative_to(generated):
             raise SupplementValidationError(
-                f"generated file must stay under {generated}: {item.path}"
+                f"生成文件必须位于 {generated} 之下：{item.path}"
             )
         if not candidate.is_file():
-            raise SupplementValidationError(f"generated file does not exist: {candidate}")
+            raise SupplementValidationError(f"生成文件不存在：{candidate}")
 
     allowed_services = set(service_names)
     for item in supplement.environment:
         if item.service not in allowed_services:
             raise SupplementValidationError(
-                f"unknown service in model supplement: {item.service}"
+                f"模型补充文件包含未知服务：{item.service}"
             )
         source = _resolve_from_project(project, item.path)
         if not source.is_relative_to(project) or not source.is_file():
             raise SupplementValidationError(
-                f"environment source must be a project file: {item.path}"
+                f"环境变量来源必须是项目文件：{item.path}"
             )
     return supplement
 

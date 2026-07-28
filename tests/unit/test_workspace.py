@@ -36,7 +36,7 @@ def test_workspace_is_private_and_keeps_generated_files(tmp_path: Path) -> None:
 
 
 def test_workspace_rejects_unsafe_run_id(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="run ID"):
+    with pytest.raises(ValueError, match="运行 ID"):
         WorkPaths.create(tmp_path, "../outside")
 
 

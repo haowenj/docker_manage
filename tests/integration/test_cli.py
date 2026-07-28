@@ -44,7 +44,7 @@ def test_noninteractive_plan_rejects_missing_answers(
     )
 
     assert result.returncode == 10
-    assert "missing answer" in result.stderr.lower()
+    assert "缺少答案" in result.stderr
 
 
 def test_dry_run_stops_before_docker_mutations(
@@ -106,7 +106,7 @@ def test_package_rejects_wrong_plan_hash_before_docker_mutation(
     )
 
     assert result.returncode == 1
-    assert "plan hash" in result.stderr.lower()
+    assert "计划哈希" in result.stderr
     assert cli.docker_log() == []
 
 
@@ -165,6 +165,38 @@ def test_interactive_answers_batch_environment_overrides(
     assert len(prompts) == 4
 
 
+def test_interactive_environment_follow_up_preserves_overrides_and_only_asks_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    questions = (
+        Question(
+            id="env.web.PORT",
+            kind="env",
+            prompt="设置 web.PORT",
+            default="8000",
+        ),
+        Question(
+            id="env.web.API_KEY",
+            kind="env",
+            prompt="设置 web.API_KEY",
+        ),
+    )
+    replies = iter(("1: 9000", "", "2: secret", ""))
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(replies))
+
+    result = _resolve_answers(questions, {}, non_interactive=False)
+
+    assert result.values == {
+        "env.web.PORT": "9000",
+        "env.web.API_KEY": "secret",
+    }
+    captured = capsys.readouterr()
+    assert captured.out.count("请设置环境变量") == 1
+    assert "以下环境变量必须填写：2. env.web.API_KEY" in captured.err
+    assert "请只补充上述缺失序号" in captured.out
+
+
 def test_cli_help_and_argument_errors_use_chinese(
     cli: CliRunner,
     compose_project: Path,
@@ -186,3 +218,14 @@ def test_cli_help_and_argument_errors_use_chinese(
     assert unknown_argument.returncode == 2
     assert "参数错误" in unknown_argument.stderr
     assert "无法识别的参数" in unknown_argument.stderr
+
+    unknown_command = cli("unknown")
+    assert unknown_command.returncode == 2
+    assert "参数错误" in unknown_command.stderr
+    assert "可选值" in unknown_command.stderr
+    assert "invalid choice" not in unknown_command.stderr
+
+    missing_value = cli("inspect", str(compose_project), "--run-id")
+    assert missing_value.returncode == 2
+    assert "参数 --run-id 需要一个值" in missing_value.stderr
+    assert "expected one argument" not in missing_value.stderr

@@ -105,7 +105,7 @@ def test_inspect_rejects_wrong_platform() -> None:
     }
     engine = DockerEngine(RecordingRunner([json.dumps(metadata)]))
 
-    with pytest.raises(PackageError, match="platform"):
+    with pytest.raises(PackageError, match="平台"):
         engine.inspect(["demo:v1"], "linux/amd64")
 
 
