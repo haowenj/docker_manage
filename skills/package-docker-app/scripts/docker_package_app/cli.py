@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -31,6 +32,7 @@ from docker_package_app.errors import (
     EXIT_MODEL_REQUIRED,
     EXIT_OK,
     EXIT_RUNTIME,
+    EXIT_USAGE,
     AnswerRequired,
     ModelRequired,
     PackageError,
@@ -50,7 +52,14 @@ from docker_package_app.models import (
     Stage,
 )
 from docker_package_app.planning import build_plan
-from docker_package_app.questions import build_questions, parse_answer
+from docker_package_app.questions import (
+    NO_ENV_OVERRIDES,
+    build_questions,
+    environment_questions,
+    format_environment_questions,
+    parse_answer,
+    parse_environment_overrides,
+)
 from docker_package_app.render import (
     render_deployment,
     validate_deployment,
@@ -80,6 +89,50 @@ ALLOWED_TRANSITIONS = {
 }
 
 
+class ChineseArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        kwargs["add_help"] = False
+        super().__init__(*args, **kwargs)
+        self._positionals.title = "位置参数"
+        self._optionals.title = "选项"
+        self.add_argument("-h", "--help", action="help", help="显示帮助并退出")
+
+    def format_usage(self) -> str:
+        return super().format_usage().replace("usage: ", "用法：", 1)
+
+    def format_help(self) -> str:
+        return super().format_help().replace("usage: ", "用法：", 1)
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        self.exit(
+            EXIT_USAGE,
+            f"{self.prog}: 参数错误：{_translate_argparse_error(message)}\n",
+        )
+
+
+def _translate_argparse_error(message: str) -> str:
+    required = "the following arguments are required: "
+    if message.startswith(required):
+        return "缺少必填参数：" + message.removeprefix(required)
+    unrecognized = "unrecognized arguments: "
+    if message.startswith(unrecognized):
+        return "无法识别的参数：" + message.removeprefix(unrecognized)
+
+    invalid_choice = re.fullmatch(
+        r"argument ([^:]+): invalid choice: (.+) \(choose from (.+)\)",
+        message,
+    )
+    if invalid_choice:
+        argument, value, choices = invalid_choice.groups()
+        return f"参数 {argument} 的值无效：{value}；可选值：{choices}"
+
+    missing_value = re.fullmatch(r"argument ([^:]+): expected one argument", message)
+    if missing_value:
+        return f"参数 {missing_value.group(1)} 需要一个值"
+    return f"参数无效：{message}"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -92,38 +145,60 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_error(exc)
         return _exit_code(exc)
     except KeyboardInterrupt:
-        print("cancelled", file=sys.stderr)
+        print("已取消", file=sys.stderr)
         return EXIT_RUNTIME
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="docker-package-app")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("inspect", "plan", "package", "run"):
-        child = subparsers.add_parser(command)
+    parser = ChineseArgumentParser(
+        prog="docker-package-app",
+        description="检查本地应用并生成可导入 Docker Manage 的离线部署包。",
+    )
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar="命令",
+    )
+    descriptions = {
+        "inspect": "检查项目并输出待确认问题",
+        "plan": "根据答案生成打包计划",
+        "package": "确认计划后构建部署包",
+        "run": "执行完整交互流程",
+    }
+    for command, description in descriptions.items():
+        child = subparsers.add_parser(command, help=description, description=description)
         _add_shared_arguments(child)
         if command in {"plan", "package", "run"}:
-            child.add_argument("--answers", type=Path)
-            child.add_argument("--non-interactive", action="store_true")
+            child.add_argument("--answers", type=Path, help="答案 JSON 文件")
+            child.add_argument(
+                "--non-interactive",
+                action="store_true",
+                help="禁用交互输入",
+            )
         if command == "package":
-            child.add_argument("--confirm-plan-hash")
+            child.add_argument("--confirm-plan-hash", help="确认执行的计划哈希")
         if command == "run":
-            child.add_argument("--dry-run", action="store_true")
+            child.add_argument("--dry-run", action="store_true", help="只生成计划，不执行打包")
     return parser
 
 
 def _add_shared_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("project", type=Path)
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--run-id")
-    parser.add_argument("--app-name")
-    parser.add_argument("--version")
-    parser.add_argument("--platform", default="linux/amd64")
-    parser.add_argument("--profile", action="append", default=[])
-    parser.add_argument("--compose-file", action="append", default=[])
-    parser.add_argument("--dockerfile")
-    parser.add_argument("--supplement", type=Path)
-    parser.add_argument("--keep-work", action="store_true")
+    parser.add_argument("project", type=Path, help="待处理的项目目录")
+    parser.add_argument("--json", action="store_true", help="输出紧凑 JSON")
+    parser.add_argument("--run-id", help="继续已有运行 ID")
+    parser.add_argument("--app-name", help="部署应用名称")
+    parser.add_argument("--version", help="镜像版本标签")
+    parser.add_argument("--platform", default="linux/amd64", help="目标容器平台")
+    parser.add_argument("--profile", action="append", default=[], help="启用 Compose profile")
+    parser.add_argument(
+        "--compose-file",
+        action="append",
+        default=[],
+        help="指定 Compose 文件",
+    )
+    parser.add_argument("--dockerfile", help="指定 Dockerfile")
+    parser.add_argument("--supplement", type=Path, help="模型补充 JSON 文件")
+    parser.add_argument("--keep-work", action="store_true", help="保留运行工作目录")
 
 
 def _dispatch(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int]:
@@ -637,7 +712,28 @@ def _resolve_answers(
     non_interactive: bool,
 ) -> AnswerBook:
     answers: dict[str, str] = {}
+    env = environment_questions(questions)
+    provided_env = {
+        question.id: parse_answer(
+            question,
+            provided[question.id],
+            chat_mode=False,
+        )
+        for question in env
+        if question.id in provided
+    }
+    pending_env = tuple(
+        question for question in env if question.id not in provided_env
+    )
+    answers.update(provided_env)
+    if pending_env:
+        if non_interactive:
+            raise AnswerRequired(f"缺少答案：{pending_env[0].id}")
+        answers.update(_read_environment_overrides(pending_env))
+
     for question in questions:
+        if question.kind == "env":
+            continue
         if question.kind == "port_host":
             expose_id = f"{question.id.removesuffix('.host')}.expose"
             if answers.get(expose_id) == "no":
@@ -650,12 +746,20 @@ def _resolve_answers(
             )
             continue
         if non_interactive:
-            raise AnswerRequired(f"missing answer for {question.id}")
+            raise AnswerRequired(f"缺少答案：{question.id}")
         while True:
-            default = f" [{question.default}]" if question.default is not None else ""
-            choices = f" ({'/'.join(question.choices)})" if question.choices else ""
+            default = (
+                f" [默认值：{question.default}]"
+                if question.default is not None
+                else ""
+            )
+            choices = (
+                f"（可选值：{'/'.join(question.choices)}）"
+                if question.choices
+                else ""
+            )
             try:
-                raw = input(f"{question.prompt}{choices}{default}: ")
+                raw = input(f"{question.prompt}{choices}{default}：")
                 answers[question.id] = parse_answer(
                     question,
                     raw,
@@ -665,6 +769,29 @@ def _resolve_answers(
             except (AnswerRequired, PackageError) as exc:
                 print(exc.message, file=sys.stderr)
     return AnswerBook(values=answers)
+
+
+def _read_environment_overrides(
+    questions: Sequence[Question],
+) -> dict[str, str]:
+    while True:
+        print("请设置环境变量，只输入需要修改的“序号: 值”。")
+        for line in format_environment_questions(questions):
+            print(line)
+        print("全部使用默认值请输入“无修改”；显式空值请使用 <EMPTY>。")
+
+        lines: list[str] = []
+        while True:
+            raw = input("环境变量覆盖（空行结束）：")
+            if raw == "":
+                break
+            lines.append(raw)
+            if raw.strip() == NO_ENV_OVERRIDES:
+                break
+        try:
+            return parse_environment_overrides(questions, lines)
+        except (AnswerRequired, PackageError) as exc:
+            print(exc.message, file=sys.stderr)
 
 
 def _store_initial(paths: WorkPaths, inspection: Inspection) -> None:
