@@ -656,7 +656,9 @@ def _compose_port(service: str, raw: object) -> PortCandidate | None:
         return None
     value, _, protocol = str(raw).partition("/")
     protocol = protocol or "tcp"
-    parts = value.rsplit(":", 2)
+    parts = _split_short_port(value)
+    if parts is None:
+        return None
     target = _integer_port(parts[-1])
     if target is None:
         return None
@@ -669,6 +671,29 @@ def _compose_port(service: str, raw: object) -> PortCandidate | None:
         host_ip=host_ip,
         host_port=host_port,
     )
+
+
+def _split_short_port(value: str) -> tuple[str, ...] | None:
+    parts: list[str] = []
+    start = 0
+    interpolation_depth = 0
+    index = 0
+    while index < len(value):
+        if value.startswith("${", index):
+            interpolation_depth += 1
+            index += 2
+            continue
+        character = value[index]
+        if character == "}" and interpolation_depth:
+            interpolation_depth -= 1
+        elif character == ":" and interpolation_depth == 0:
+            parts.append(value[start:index])
+            start = index + 1
+        index += 1
+    if interpolation_depth:
+        return None
+    parts.append(value[start:])
+    return tuple(parts) if 1 <= len(parts) <= 3 else None
 
 
 def _container_port(raw: str) -> tuple[int, str] | None:
