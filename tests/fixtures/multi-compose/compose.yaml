@@ -1,0 +1,13 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: example/web:dev
+    environment:
+      LOG_LEVEL: info
+  worker:
+    build: ./worker
+  redis:
+    image: redis:7
+
