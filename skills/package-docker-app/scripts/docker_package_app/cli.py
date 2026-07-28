@@ -271,6 +271,18 @@ def _perform_inspect(
         )
         inspection = merge_supplement(inspection, supplement)
         extra_questions = supplement_questions(supplement)
+        if extra_questions:
+            inspection = inspection.model_copy(
+                update={
+                    "stage": Stage.NEEDS_MODEL,
+                    "model_reasons": tuple(
+                        f"model_ambiguity:{item.id}"
+                        for item in supplement.ambiguities
+                    ),
+                }
+            )
+            _store_initial(paths, inspection)
+            return _inspection_result(inspection, extra_questions), EXIT_MODEL_REQUIRED
     questions = (*build_questions(inspection), *extra_questions)
     _store_initial(paths, inspection)
     return _inspection_result(inspection, questions), EXIT_OK

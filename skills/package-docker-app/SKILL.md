@@ -126,6 +126,10 @@ Use this only after `inspect` exits with `EXIT_MODEL_REQUIRED=20`.
      --run-id "$RUN_ID" --supplement "$SUPPLEMENT" --json
    ```
 
-6. If validation fails, correct only files under `.docker-manage/generated/` and
+6. If inspection again exits `20` with `model.*` questions, ask every question in
+   order. Apply the answers to the generated Docker configuration, remove only the
+   resolved ambiguities from the supplement, and repeat step 5. Rerun `inspect` until it exits `0`;
+   do not continue to `plan` while an ambiguity remains.
+7. If validation fails, correct only files under `.docker-manage/generated/` and
    the supplement JSON. Do not change an existing project file to make validation
    pass.

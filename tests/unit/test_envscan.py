@@ -66,3 +66,26 @@ def test_required_dockerfile_arg_is_collected() -> None:
         ("web", "PRIVATE_INDEX_URL", None),
         ("worker", "WORKER_QUEUE", "default"),
     ]
+
+
+def test_compose_interpolation_outside_environment_is_collected() -> None:
+    root, _, roots, dockerfiles = _project()
+    compose = ComposeDocument.from_data(
+        root,
+        {
+            "services": {
+                "web": {
+                    "build": {"context": "web"},
+                    "command": ["serve", "--workers", "${WORKERS:-4}"],
+                    "volumes": ["${CONFIG_PATH}:/app/config:ro"],
+                },
+                "worker": {"build": {"context": "worker"}},
+            }
+        },
+    )
+
+    found = scan_environment(root, roots, compose, dockerfiles)
+    by_name = {(item.service, item.name): item for item in found}
+
+    assert {default.value for default in by_name[("web", "WORKERS")].defaults} == {"4"}
+    assert ("web", "CONFIG_PATH") in by_name

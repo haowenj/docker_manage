@@ -32,6 +32,7 @@ def test_skill_requires_every_question_and_explicit_confirmation(
     assert "Show full defaults, including passwords, tokens, and keys" in skill_text
     assert "默认" in skill_text
     assert "explicit confirmation" in skill_text
+    assert "Rerun `inspect` until it exits `0`" in skill_text
 
 
 def test_skill_has_no_template_markers(skill_text: str) -> None:

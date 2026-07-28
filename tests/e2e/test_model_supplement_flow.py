@@ -76,7 +76,13 @@ def test_missing_docker_files_are_generated_only_in_tool_directory(
                         "line": 3,
                     }
                 ],
-                "ambiguities": [],
+                "ambiguities": [
+                    {
+                        "id": "startup.web",
+                        "prompt": "Choose the web startup command",
+                        "choices": ["python app.py", "python -m app"],
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -93,10 +99,31 @@ def test_missing_docker_files_are_generated_only_in_tool_directory(
         env={"FAKE_DOCKER_COMPOSE_CONFIG": json.dumps(compose_data)},
     )
 
-    assert resumed.returncode == 0, resumed.stderr
+    assert resumed.returncode == 20, resumed.stderr
     body = json.loads(resumed.stdout)
-    assert body["stage"] == "inspected"
+    assert body["stage"] == "needs_model"
     assert [question["id"] for question in body["questions"]] == [
+        "model.startup.web",
+    ]
+
+    supplement_body = json.loads(supplement.read_text(encoding="utf-8"))
+    supplement_body["ambiguities"] = []
+    supplement.write_text(json.dumps(supplement_body), encoding="utf-8")
+    completed = cli(
+        "inspect",
+        str(project),
+        "--run-id",
+        run_id,
+        "--supplement",
+        str(supplement),
+        "--json",
+        env={"FAKE_DOCKER_COMPOSE_CONFIG": json.dumps(compose_data)},
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    completed_body = json.loads(completed.stdout)
+    assert completed_body["stage"] == "inspected"
+    assert [question["id"] for question in completed_body["questions"]] == [
         "env.web.PORT",
         "port.web.8000/tcp.expose",
         "port.web.8000/tcp.host",

@@ -31,6 +31,12 @@ IGNORED_PARTS = {
 ENV_INTERPOLATION = re.compile(
     r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?:(?::-|-)(.*))?\}$"
 )
+COMPOSE_INTERPOLATION = re.compile(
+    r"(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-+?])([^}]*))?\}"
+)
+COMPOSE_SIMPLE_INTERPOLATION = re.compile(
+    r"(?<![$A-Za-z0-9_])\$([A-Za-z_][A-Za-z0-9_]*)"
+)
 
 
 @dataclass(frozen=True)
@@ -246,7 +252,33 @@ def _scan_compose_service(
             for name, value in values.items():
                 source = SourceRef(path=_display_path(project_root, path), line=None)
                 found.append(_env_candidate(service, name, source, value))
+
+    interpolation_fields = {
+        key: value
+        for key, value in config.items()
+        if key not in {"environment", "env_file"}
+    }
+    for text in _nested_strings(interpolation_fields):
+        for match in COMPOSE_INTERPOLATION.finditer(text):
+            operator = match.group(2)
+            default = match.group(3) if operator in {"-", ":-"} else None
+            found.append(
+                _env_candidate(service, match.group(1), compose_source, default)
+            )
+        for match in COMPOSE_SIMPLE_INTERPOLATION.finditer(text):
+            found.append(_env_candidate(service, match.group(1), compose_source, None))
     return found
+
+
+def _nested_strings(value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _nested_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _nested_strings(item)
 
 
 def _scan_dockerfile_env(
