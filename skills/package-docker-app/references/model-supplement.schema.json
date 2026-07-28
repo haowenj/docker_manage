@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docker-manage.local/schemas/model-supplement-v1.json",
+  "title": "Docker package model supplement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_files", "environment", "ambiguities"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "generated_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": {"enum": ["dockerfile", "compose"]},
+          "path": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "environment": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service", "name", "default", "path", "line"],
+        "properties": {
+          "service": {"type": "string", "minLength": 1},
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "default": {"type": ["string", "null"]},
+          "path": {"type": "string", "minLength": 1},
+          "line": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "ambiguities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "prompt", "choices"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "prompt": {"type": "string", "minLength": 1},
+          "choices": {
+            "type": "array",
+            "minItems": 2,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    }
+  }
+}
+
