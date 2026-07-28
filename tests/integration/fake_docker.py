@@ -15,7 +15,15 @@ def main() -> int:
             handle.write(json.dumps(sys.argv[1:]) + "\n")
 
     args = sys.argv[1:]
-    if args[:3] == ["image", "inspect", "--format"]:
+    if args[:2] == ["version", "--format"]:
+        print(os.environ.get("FAKE_DOCKER_VERSION", "29.0.0|29.0.0"))
+    elif args[:2] == ["compose", "version"]:
+        print(os.environ.get("FAKE_DOCKER_COMPOSE_VERSION", "Docker Compose version v2.0.0"))
+    elif args[:2] == ["buildx", "version"]:
+        print(os.environ.get("FAKE_DOCKER_BUILDX_VERSION", "github.com/docker/buildx v0.20.0"))
+    elif args and args[0] == "compose" and "config" in args:
+        print(os.environ.get("FAKE_DOCKER_COMPOSE_CONFIG", '{"services": {}}'))
+    elif args[:3] == ["image", "inspect", "--format"]:
         raw = os.environ.get("FAKE_DOCKER_INSPECT", "[]")
         records = json.loads(raw)
         if isinstance(records, dict):
