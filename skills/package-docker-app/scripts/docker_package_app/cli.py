@@ -192,7 +192,7 @@ def _perform_inspect(
     known_dockerfiles.extend(generated_dockerfiles)
     if args.dockerfile:
         known_dockerfiles.append(_resolve_project_path(project, args.dockerfile))
-    if not known_dockerfiles:
+    if not compose_files and not known_dockerfiles:
         reasons.append("dockerfile_missing")
 
     if reasons:

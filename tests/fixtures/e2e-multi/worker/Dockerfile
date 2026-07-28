@@ -1,0 +1,2 @@
+FROM scratch
+EXPOSE 9000
