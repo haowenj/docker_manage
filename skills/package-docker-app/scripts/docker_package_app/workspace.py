@@ -26,7 +26,7 @@ class WorkPaths:
     ignore_file: Path
 
     @classmethod
-    def create(cls, project_root: Path, run_id: str) -> "WorkPaths":
+    def create(cls, project_root: Path, run_id: str) -> WorkPaths:
         if not RUN_ID_PATTERN.fullmatch(run_id):
             raise ValueError(f"invalid run ID: {run_id!r}")
 

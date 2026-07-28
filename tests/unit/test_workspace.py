@@ -2,7 +2,6 @@ import stat
 from pathlib import Path
 
 import pytest
-
 from docker_package_app.models import Inspection, Stage
 from docker_package_app.workspace import (
     WorkPaths,

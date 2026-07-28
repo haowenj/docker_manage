@@ -1,8 +1,6 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from docker_package_app.models import (
     DiskEstimate,
     EnvCandidate,
@@ -11,6 +9,7 @@ from docker_package_app.models import (
     SourceRef,
     Stage,
 )
+from pydantic import ValidationError
 
 
 def test_inspection_round_trips_with_schema_version() -> None:

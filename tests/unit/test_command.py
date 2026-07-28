@@ -1,7 +1,6 @@
 import subprocess
 
 import pytest
-
 from docker_package_app.command import CommandRunner
 from docker_package_app.errors import PackageError
 

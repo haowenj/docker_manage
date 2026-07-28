@@ -35,7 +35,7 @@ class ComposeDocument:
         files: Sequence[Path],
         profiles: Sequence[str],
         runner: CommandRunner,
-    ) -> "ComposeDocument":
+    ) -> ComposeDocument:
         root = project_root.resolve()
         argv = ["docker", "compose", "--project-directory", str(root)]
         resolved_files = [Path(path).resolve() for path in files]
@@ -61,7 +61,7 @@ class ComposeDocument:
         cls,
         project_root: Path,
         data: Mapping[str, Any],
-    ) -> "ComposeDocument":
+    ) -> ComposeDocument:
         return cls(project_root, dict(data))
 
     def services(self) -> tuple[str, ...]:

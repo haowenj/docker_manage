@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from docker_package_app.command import CommandResult
 from docker_package_app.compose import ComposeDocument
 from docker_package_app.errors import UsageError
