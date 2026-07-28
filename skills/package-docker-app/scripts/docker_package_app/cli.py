@@ -130,7 +130,7 @@ def _translate_argparse_error(message: str) -> str:
     missing_value = re.fullmatch(r"argument ([^:]+): expected one argument", message)
     if missing_value:
         return f"参数 {missing_value.group(1)} 需要一个值"
-    return f"参数无效：{message}"
+    return "参数内容不符合要求"
 
 
 def main(argv: Sequence[str] | None = None) -> int:

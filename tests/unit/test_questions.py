@@ -55,6 +55,12 @@ def test_questions_show_conflicting_secret_defaults() -> None:
     assert question.default is None
     assert "secret-one" in question.prompt
     assert "secret-two" in question.prompt
+    assert format_environment_questions((question,)) == (
+        (
+            "1. 设置 web.API_KEY。默认值来源：.env:1=secret-one, "
+            "app.py:4=secret-two，必填，默认值冲突"
+        ),
+    )
 
 
 def test_environment_overrides_fill_omitted_defaults() -> None:

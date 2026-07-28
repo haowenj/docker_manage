@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from conftest import CliRunner
-from docker_package_app.cli import _resolve_answers
+from docker_package_app.cli import _resolve_answers, _translate_argparse_error
 from docker_package_app.models import Question
 
 
@@ -229,3 +229,7 @@ def test_cli_help_and_argument_errors_use_chinese(
     assert missing_value.returncode == 2
     assert "参数 --run-id 需要一个值" in missing_value.stderr
     assert "expected one argument" not in missing_value.stderr
+
+
+def test_unknown_argparse_error_does_not_expose_english_fallback() -> None:
+    assert _translate_argparse_error("unexpected parser failure") == "参数内容不符合要求"

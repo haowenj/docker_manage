@@ -116,11 +116,12 @@ def format_environment_questions(
 ) -> tuple[str, ...]:
     lines: list[str] = []
     for index, question in enumerate(environment_questions(questions), start=1):
-        suffix = (
-            f"，默认值：{question.default}"
-            if question.default is not None
-            else "，必填，无默认值"
-        )
+        if question.default is not None:
+            suffix = f"，默认值：{question.default}"
+        elif "默认值来源：" in question.prompt:
+            suffix = "，必填，默认值冲突"
+        else:
+            suffix = "，必填，无默认值"
         lines.append(f"{index}. {question.prompt}{suffix}")
     return tuple(lines)
 

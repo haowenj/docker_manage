@@ -347,7 +347,7 @@ Expected: ruff 无错误；pytest 全部通过且无失败。
 - [ ] **Step 4: 运行技能快速校验和工作树检查**
 
 ```bash
-python /Users/wenjuhao/.codex-company/skills/.system/skill-creator/scripts/quick_validate.py skills/package-docker-app
+uv run --project skills/package-docker-app python /Users/wenjuhao/.codex-company/skills/.system/skill-creator/scripts/quick_validate.py skills/package-docker-app
 git diff --check
 git status --short
 ```
