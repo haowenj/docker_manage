@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from docker_package_app.errors import AnswerRequired, PlanValidationError
@@ -7,6 +8,7 @@ from docker_package_app.models import Inspection, Question
 
 YES_VALUES = {"yes", "y", "true", "1", "是"}
 NO_VALUES = {"no", "n", "false", "0", "否"}
+NO_ENV_OVERRIDES = "无修改"
 
 
 def build_questions(inspection: Inspection) -> tuple[Question, ...]:
@@ -18,9 +20,9 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
             f"{item.source.path}:{item.source.line or '-'}={item.value}"
             for item in candidate.defaults
         )
-        prompt = f"Set {candidate.service}.{candidate.name}"
+        prompt = f"设置 {candidate.service}.{candidate.name}"
         if source_text:
-            prompt += f". Defaults: {source_text}"
+            prompt += f"。默认值来源：{source_text}"
         questions.append(
             Question(
                 id=f"env.{candidate.service}.{candidate.name}",
@@ -38,7 +40,7 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
             Question(
                 id=f"buildarg.{candidate.service}.{candidate.name}",
                 kind="build_arg",
-                prompt=f"Set build argument {candidate.service}.{candidate.name}",
+                prompt=f"设置构建参数 {candidate.service}.{candidate.name}",
                 default=candidate.default,
             )
         )
@@ -53,8 +55,8 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
                 id=f"{prefix}.expose",
                 kind="port_expose",
                 prompt=(
-                    f"Expose {port.service} container port "
-                    f"{port.container_port}/{port.protocol}?"
+                    f"是否暴露 {port.service} 的容器端口 "
+                    f"{port.container_port}/{port.protocol}？（yes=是，no=否）"
                 ),
                 default="yes" if port.host_port else "no",
                 choices=("yes", "no"),
@@ -64,7 +66,10 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
             Question(
                 id=f"{prefix}.host",
                 kind="port_host",
-                prompt=f"Host port for {port.service}:{port.container_port}/{port.protocol}",
+                prompt=(
+                    f"设置 {port.service}:{port.container_port}/{port.protocol} "
+                    "对应的主机端口"
+                ),
                 default=str(port.host_port or port.container_port),
             )
         )
@@ -77,8 +82,8 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
                 id=f"image.{image.service}.decision",
                 kind="image",
                 prompt=(
-                    f"Check Docker Manage for {image.image}. Paste a reusable image "
-                    "reference, or choose 打包 to pull and include the original image."
+                    f"请在 Docker Manage 中检查镜像 {image.image}。粘贴可复用的镜像引用，"
+                    "或输入“打包”以拉取并包含原始镜像。"
                 ),
                 default="打包",
             )
@@ -93,13 +98,70 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
                 id=_file_question_id(candidate.resolved_path),
                 kind="file",
                 prompt=(
-                    f"{candidate.resolved_path} is outside the project. "
-                    "Choose keep_server_path or abort."
+                    f"{candidate.resolved_path} 位于项目目录之外。请选择 "
+                    "keep_server_path（保留服务器路径）或 abort（中止）。"
                 ),
                 choices=("keep_server_path", "abort"),
             )
         )
     return tuple(questions)
+
+
+def environment_questions(questions: Sequence[Question]) -> tuple[Question, ...]:
+    return tuple(question for question in questions if question.kind == "env")
+
+
+def format_environment_questions(
+    questions: Sequence[Question],
+) -> tuple[str, ...]:
+    lines: list[str] = []
+    for index, question in enumerate(environment_questions(questions), start=1):
+        suffix = (
+            f"，默认值：{question.default}"
+            if question.default is not None
+            else "，必填，无默认值"
+        )
+        lines.append(f"{index}. {question.prompt}{suffix}")
+    return tuple(lines)
+
+
+def parse_environment_overrides(
+    questions: Sequence[Question],
+    lines: Sequence[str],
+) -> dict[str, str]:
+    env = environment_questions(questions)
+    meaningful = tuple(line.strip() for line in lines if line.strip())
+    overrides: dict[int, str] = {}
+    if meaningful != (NO_ENV_OVERRIDES,):
+        for line in meaningful:
+            sequence_text, separator, value = line.partition(":")
+            if not separator or not sequence_text.strip().isdigit():
+                raise PlanValidationError(
+                    f"环境变量输入格式错误：{line}；请使用 序号: 值"
+                )
+            sequence = int(sequence_text.strip())
+            if sequence < 1 or sequence > len(env):
+                raise PlanValidationError(f"环境变量序号超出范围：{sequence}")
+            if sequence in overrides:
+                raise PlanValidationError(f"环境变量序号重复：{sequence}")
+            overrides[sequence] = value.strip()
+
+    answers: dict[str, str] = {}
+    missing: list[str] = []
+    for sequence, question in enumerate(env, start=1):
+        if sequence in overrides:
+            answers[question.id] = parse_answer(
+                question,
+                overrides[sequence],
+                chat_mode=True,
+            )
+        elif question.default is not None:
+            answers[question.id] = question.default
+        else:
+            missing.append(f"{sequence}. {question.id}")
+    if missing:
+        raise AnswerRequired("以下环境变量必须填写：" + "；".join(missing))
+    return answers
 
 
 def parse_answer(question: Question, raw: str, *, chat_mode: bool) -> str:
@@ -109,12 +171,12 @@ def parse_answer(question: Question, raw: str, *, chat_mode: bool) -> str:
     if wants_default:
         if question.default is None:
             raise AnswerRequired(
-                f"answer required for {question.id}",
-                hint="Provide a value; use <EMPTY> for an explicit empty string.",
+                f"问题 {question.id} 必须填写",
+                hint="请提供一个值；显式空字符串请使用 <EMPTY>。",
             )
         return question.default
     if raw == "" and question.required:
-        raise AnswerRequired(f"answer required for {question.id}")
+        raise AnswerRequired(f"问题 {question.id} 必须填写")
 
     value = raw
     if question.kind == "port_expose":
@@ -124,11 +186,11 @@ def parse_answer(question: Question, raw: str, *, chat_mode: bool) -> str:
         elif normalized in NO_VALUES:
             value = "no"
         else:
-            raise PlanValidationError(f"invalid yes/no answer for {question.id}: {raw}")
+            raise PlanValidationError(f"问题 {question.id} 的是/否答案无效：{raw}")
     if question.choices and value not in question.choices:
         raise PlanValidationError(
-            f"invalid answer for {question.id}: {value}; "
-            f"choose one of {', '.join(question.choices)}"
+            f"问题 {question.id} 的答案无效：{value}；"
+            f"请选择以下值之一：{', '.join(question.choices)}"
         )
     return value
 
@@ -138,4 +200,3 @@ def _file_question_id(resolved_path: str) -> str:
 
     digest = hashlib.sha256(str(Path(resolved_path)).encode()).hexdigest()[:16]
     return f"file.{digest}.decision"
-
