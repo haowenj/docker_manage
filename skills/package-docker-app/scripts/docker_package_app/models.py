@@ -77,6 +77,7 @@ class FileCandidate(StrictModel):
     resolved_path: str
     kind: Literal["bind", "config", "secret"]
     inside_project: bool
+    project_path: str | None = None
     estimated_size: int = Field(ge=0)
 
 
