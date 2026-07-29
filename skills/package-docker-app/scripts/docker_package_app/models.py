@@ -124,6 +124,7 @@ class FileAssignment(StrictModel):
     service: str
     original_value: str
     resolved_path: str
+    kind: Literal["bind", "config", "secret"]
     action: FileAction
     payload_path: str | None = None
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 
 from docker_package_app.current_config import artifact_component
@@ -62,6 +63,7 @@ def build_plan(
     ports = _build_ports(inspection, answers)
     images = _build_images(inspection, answers, app_name, version, platform)
     files = _build_files(inspection, answers)
+    copied_input_bytes = _copied_input_bytes(inspection, files)
     unknown = tuple(
         sorted(
             item.final_image
@@ -82,7 +84,7 @@ def build_plan(
         files=files,
         build_args=build_args,
         disk=DiskEstimate(
-            known_input_bytes=sum(item.estimated_size for item in inspection.files),
+            known_input_bytes=copied_input_bytes,
             free_bytes=inspection.free_disk_bytes,
             unknown_components=unknown,
         ),
@@ -201,33 +203,62 @@ def _build_files(
 ) -> tuple[FileAssignment, ...]:
     root = Path(inspection.project_root).resolve()
     assignments: list[FileAssignment] = []
-    for item in sorted(inspection.files, key=lambda value: value.resolved_path):
+    for item in sorted(
+        inspection.files,
+        key=lambda value: (
+            value.resolved_path,
+            value.service,
+            value.kind,
+            value.compose_value,
+        ),
+    ):
         path = Path(item.resolved_path).resolve()
-        if item.inside_project:
+        if item.kind == "bind" or not item.inside_project:
+            decision = answers.values[_file_question_id(str(path))]
+            if decision == "abort":
+                raise PlanValidationError(f"已因路径 {path} 中止打包")
+            action = FileAction(decision)
+        else:
+            action = FileAction.COPY
+
+        if action is FileAction.COPY and not item.inside_project:
+            raise PlanValidationError(f"无法复制项目目录之外的路径：{path}")
+
+        payload_path = None
+        if action is FileAction.COPY:
             relative = path.relative_to(root)
             payload = Path("files") / (relative if relative.parts else Path("project"))
-            assignments.append(
-                FileAssignment(
-                    service=item.service,
-                    original_value=item.compose_value,
-                    resolved_path=str(path),
-                    action=FileAction.COPY,
-                    payload_path=payload.as_posix(),
-                )
-            )
-            continue
-        decision = answers.values[_file_question_id(str(path))]
-        if decision == "abort":
-            raise PlanValidationError(f"已因外部路径中止打包：{path}")
+            payload_path = payload.as_posix()
         assignments.append(
             FileAssignment(
                 service=item.service,
                 original_value=item.compose_value,
                 resolved_path=str(path),
-                action=FileAction.KEEP_SERVER_PATH,
+                kind=item.kind,
+                action=action,
+                payload_path=payload_path,
             )
         )
     return tuple(assignments)
+
+
+def _copied_input_bytes(
+    inspection: Inspection,
+    assignments: Sequence[FileAssignment],
+) -> int:
+    copied_paths = {
+        item.resolved_path
+        for item in assignments
+        if item.action is FileAction.COPY
+    }
+    size_by_path: dict[str, int] = {}
+    for item in inspection.files:
+        if item.resolved_path in copied_paths:
+            size_by_path[item.resolved_path] = max(
+                size_by_path.get(item.resolved_path, 0),
+                item.estimated_size,
+            )
+    return sum(size_by_path.values())
 
 
 def _ports_conflict(left: PortAssignment, right: PortAssignment) -> bool:

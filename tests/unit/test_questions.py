@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import pytest
 from docker_package_app.errors import AnswerRequired, PlanValidationError
 from docker_package_app.models import (
     CurrentPortSelection,
     DefaultValue,
     EnvCandidate,
+    FileCandidate,
     Inspection,
     PortCandidate,
     Question,
@@ -11,11 +14,132 @@ from docker_package_app.models import (
     Stage,
 )
 from docker_package_app.questions import (
+    _file_question_id,
     build_questions,
     format_environment_questions,
     parse_answer,
     parse_environment_overrides,
 )
+
+
+def _file(
+    *,
+    service: str,
+    source: str,
+    resolved: str,
+    kind: str = "bind",
+    inside: bool = True,
+    size: int = 12,
+) -> FileCandidate:
+    return FileCandidate(
+        service=service,
+        compose_value=source,
+        resolved_path=resolved,
+        kind=kind,
+        inside_project=inside,
+        project_path=Path(resolved).name if inside else None,
+        estimated_size=size,
+    )
+
+
+def test_project_bind_question_offers_copy_keep_and_abort() -> None:
+    candidate = _file(
+        service="web",
+        source="./data",
+        resolved="/project/data",
+        size=2048,
+    )
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        files=(candidate,),
+    )
+
+    question = build_questions(inspection)[0]
+
+    assert question.id == _file_question_id("/project/data")
+    assert question.kind == "file"
+    assert question.default == "copy"
+    assert question.choices == ("copy", "keep_server_path", "abort")
+    assert "web" in question.prompt
+    assert "./data" in question.prompt
+    assert "/project/data" in question.prompt
+    assert "项目目录内" in question.prompt
+    assert "2048" in question.prompt
+
+
+def test_shared_bind_source_generates_one_question() -> None:
+    files = (
+        _file(
+            service="api",
+            source="./data",
+            resolved="/project/data",
+        ),
+        _file(
+            service="worker",
+            source="./data",
+            resolved="/project/data",
+        ),
+    )
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        files=files,
+    )
+
+    questions = build_questions(inspection)
+
+    assert len(questions) == 1
+    assert "api" in questions[0].prompt
+    assert "worker" in questions[0].prompt
+
+
+def test_external_dependency_keeps_existing_choices_without_default() -> None:
+    candidate = _file(
+        service="web",
+        source="/srv/app.ini",
+        resolved="/srv/app.ini",
+        kind="config",
+        inside=False,
+    )
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        files=(candidate,),
+    )
+
+    question = build_questions(inspection)[0]
+
+    assert question.default is None
+    assert question.choices == ("keep_server_path", "abort")
+    assert "项目目录外" in question.prompt
+
+
+def test_project_config_and_secret_do_not_generate_file_questions() -> None:
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        files=(
+            _file(
+                service="web",
+                source="./app.ini",
+                resolved="/project/app.ini",
+                kind="config",
+            ),
+            _file(
+                service="web",
+                source="./secret.txt",
+                resolved="/project/secret.txt",
+                kind="secret",
+            ),
+        ),
+    )
+
+    assert build_questions(inspection) == ()
 
 
 def test_default_and_explicit_empty_rules() -> None:

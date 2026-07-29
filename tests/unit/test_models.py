@@ -6,6 +6,8 @@ from docker_package_app.models import (
     DefaultValue,
     DiskEstimate,
     EnvCandidate,
+    FileAction,
+    FileAssignment,
     Inspection,
     PackagePlan,
     PortCandidate,
@@ -13,6 +15,20 @@ from docker_package_app.models import (
     Stage,
 )
 from pydantic import ValidationError
+
+
+def test_file_assignment_records_dependency_kind() -> None:
+    assignment = FileAssignment(
+        service="web",
+        original_value="./data",
+        resolved_path="/project/data",
+        kind="bind",
+        action=FileAction.KEEP_SERVER_PATH,
+    )
+
+    restored = FileAssignment.model_validate_json(assignment.model_dump_json())
+
+    assert restored.kind == "bind"
 
 
 def test_inspection_round_trips_with_schema_version() -> None:

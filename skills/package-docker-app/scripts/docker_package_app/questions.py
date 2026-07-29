@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
 from docker_package_app.errors import AnswerRequired, PlanValidationError
-from docker_package_app.models import Inspection, Question
+from docker_package_app.models import FileCandidate, Inspection, Question
 
 YES_VALUES = {"yes", "y", "true", "1", "是"}
 NO_VALUES = {"no", "n", "false", "0", "否"}
@@ -121,19 +122,44 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
             )
         )
 
-    for candidate in sorted(
-        (item for item in inspection.files if not item.inside_project),
-        key=lambda item: item.resolved_path,
-    ):
+    grouped_files: dict[str, list[FileCandidate]] = defaultdict(list)
+    for candidate in inspection.files:
+        if candidate.kind == "bind" or not candidate.inside_project:
+            grouped_files[candidate.resolved_path].append(candidate)
+
+    for resolved_path in sorted(grouped_files):
+        candidates = grouped_files[resolved_path]
+        inside_project = all(item.inside_project for item in candidates)
+        services = ", ".join(sorted({item.service for item in candidates}))
+        compose_values = ", ".join(
+            sorted({item.compose_value for item in candidates})
+        )
+        kinds = ", ".join(sorted({item.kind for item in candidates}))
+        estimated_size = max(item.estimated_size for item in candidates)
+        location = "项目目录内" if inside_project else "项目目录外"
+        if inside_project:
+            choices = ("copy", "keep_server_path", "abort")
+            default = "copy"
+            meaning = (
+                "copy（复制本机内容）、keep_server_path（保留服务器现有路径）"
+                "或 abort（中止）"
+            )
+        else:
+            choices = ("keep_server_path", "abort")
+            default = None
+            meaning = "keep_server_path（保留服务器路径）或 abort（中止）"
         questions.append(
             Question(
-                id=_file_question_id(candidate.resolved_path),
+                id=_file_question_id(resolved_path),
                 kind="file",
                 prompt=(
-                    f"{candidate.resolved_path} 位于项目目录之外。请选择 "
-                    "keep_server_path（保留服务器路径）或 abort（中止）。"
+                    f"本地依赖 {resolved_path} 位于{location}；"
+                    f"服务：{services}；类型：{kinds}；"
+                    f"Compose source：{compose_values}；"
+                    f"估算大小：{estimated_size} 字节。请选择 {meaning}。"
                 ),
-                choices=("keep_server_path", "abort"),
+                default=default,
+                choices=choices,
             )
         )
     return tuple(questions)
