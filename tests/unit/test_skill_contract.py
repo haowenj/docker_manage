@@ -78,3 +78,21 @@ def test_skill_uses_current_ports_and_writable_bind_copies(
     )
     for text in required:
         assert text in skill_text
+
+
+def test_skill_requires_explicit_bind_copy_or_server_preservation(
+    skill_text: str,
+) -> None:
+    required = (
+        "每个 bind mount",
+        "`copy`",
+        "`keep_server_path`",
+        "`abort`",
+        "不进入归档",
+        "保留原始挂载路径",
+        "重复解压",
+        "复制文件",
+        "保留的服务器路径",
+    )
+    for text in required:
+        assert text in skill_text
