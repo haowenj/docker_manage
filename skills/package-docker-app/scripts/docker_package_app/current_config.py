@@ -16,6 +16,7 @@ from docker_package_app.models import (
     DefaultValue,
     EnvAssignment,
     EnvCandidate,
+    PortAssignment,
     PortCandidate,
     SourceRef,
     StrictModel,
@@ -176,3 +177,103 @@ def write_current_environment(
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+
+
+def write_current_ports(
+    project_root: Path,
+    assignments: Sequence[PortAssignment],
+) -> Path:
+    target = project_root.resolve() / CURRENT_PORTS_RELATIVE
+    entries = tuple(
+        _PortSnapshotEntry(
+            service=item.service,
+            container_port=item.container_port,
+            protocol=item.protocol,
+            exposed=item.exposed,
+            host_port=item.host_port,
+        )
+        for item in sorted(
+            assignments,
+            key=lambda value: (
+                value.service,
+                value.container_port,
+                value.protocol,
+            ),
+        )
+    )
+    body = _PortSnapshot(ports=entries).model_dump_json(indent=2) + "\n"
+    return _atomic_write_snapshot(target, body)
+
+
+def _atomic_write_snapshot(target: Path, body: str) -> Path:
+    temporary: Path | None = None
+    try:
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target.parent.chmod(0o700)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o600)
+        os.replace(temporary, target)
+        temporary = None
+        return target
+    except OSError as exc:
+        raise PackageError(f"无法更新当前配置快照 {target}：{exc}") from exc
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def write_current_configuration(
+    project_root: Path,
+    environment: Sequence[EnvAssignment],
+    ports: Sequence[PortAssignment],
+) -> tuple[Path, Path]:
+    root = project_root.resolve()
+    targets = (
+        root / CURRENT_ENV_RELATIVE,
+        root / CURRENT_PORTS_RELATIVE,
+    )
+    previous: dict[Path, tuple[bytes | None, int | None]] = {}
+    try:
+        for target in targets:
+            if target.exists():
+                previous[target] = (
+                    target.read_bytes(),
+                    target.stat().st_mode & 0o777,
+                )
+            else:
+                previous[target] = (None, None)
+    except OSError as exc:
+        raise PackageError(f"无法读取当前配置快照以便回滚：{exc}") from exc
+
+    try:
+        env_path = write_current_environment(root, environment)
+        ports_path = write_current_ports(root, ports)
+        return env_path, ports_path
+    except PackageError as original:
+        failures: list[str] = []
+        for target, (body, mode) in previous.items():
+            try:
+                if body is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    _atomic_write_snapshot(target, body.decode("utf-8"))
+                    if mode is not None:
+                        target.chmod(mode)
+            except (OSError, PackageError, UnicodeDecodeError) as restore_error:
+                failures.append(f"{target}: {restore_error}")
+        if failures:
+            raise PackageError(
+                f"{original}；当前配置恢复失败，请人工检查："
+                + "；".join(failures)
+            ) from original
+        raise

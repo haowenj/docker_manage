@@ -173,6 +173,12 @@ def test_dry_run_stops_before_docker_mutations(
     snapshot = compose_project / ".docker-manage/.env"
     snapshot.parent.mkdir()
     snapshot.write_text("PORT='last-good'\n", encoding="utf-8")
+    ports_snapshot = compose_project / ".docker-manage/ports.json"
+    ports_snapshot.write_text(
+        '{"schema_version":1,"ports":[]}\n',
+        encoding="utf-8",
+    )
+    previous_ports = ports_snapshot.read_text(encoding="utf-8")
 
     result = cli(
         "run",
@@ -187,6 +193,7 @@ def test_dry_run_stops_before_docker_mutations(
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["stage"] == "planned"
     assert snapshot.read_text(encoding="utf-8") == "PORT='last-good'\n"
+    assert ports_snapshot.read_text(encoding="utf-8") == previous_ports
     mutations = {
         ("compose", "build"),
         ("pull", "--platform"),
@@ -202,6 +209,12 @@ def test_failed_package_does_not_replace_current_environment(
     snapshot = compose_project / ".docker-manage/.env"
     snapshot.parent.mkdir()
     snapshot.write_text("PORT='last-good'\n", encoding="utf-8")
+    ports_snapshot = compose_project / ".docker-manage/ports.json"
+    ports_snapshot.write_text(
+        '{"schema_version":1,"ports":[]}\n',
+        encoding="utf-8",
+    )
+    previous_ports = ports_snapshot.read_text(encoding="utf-8")
     answers = compose_project / "failed-package-answers.json"
     answers.write_text(
         json.dumps(
@@ -246,6 +259,7 @@ def test_failed_package_does_not_replace_current_environment(
 
     assert packaged.returncode == 1
     assert snapshot.read_text(encoding="utf-8") == "PORT='last-good'\n"
+    assert ports_snapshot.read_text(encoding="utf-8") == previous_ports
 
 
 def test_package_rejects_wrong_plan_hash_before_docker_mutation(

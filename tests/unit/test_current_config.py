@@ -9,13 +9,16 @@ from docker_package_app.current_config import (
     artifact_component,
     attach_current_ports,
     attach_current_values,
+    write_current_configuration,
     write_current_environment,
+    write_current_ports,
 )
 from docker_package_app.errors import PackageError, UsageError
 from docker_package_app.models import (
     DefaultValue,
     EnvAssignment,
     EnvCandidate,
+    PortAssignment,
     PortCandidate,
     SourceRef,
 )
@@ -193,6 +196,49 @@ def test_write_current_environment_is_complete_sorted_and_private(
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+def test_write_current_ports_is_complete_sorted_and_private(
+    tmp_path: Path,
+) -> None:
+    path = write_current_ports(
+        tmp_path,
+        (
+            PortAssignment(
+                service="worker",
+                container_port=9000,
+                exposed=False,
+            ),
+            PortAssignment(
+                service="web",
+                container_port=8000,
+                exposed=True,
+                host_port=8322,
+            ),
+        ),
+    )
+
+    assert path == tmp_path / ".docker-manage/ports.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "ports": [
+            {
+                "service": "web",
+                "container_port": 8000,
+                "protocol": "tcp",
+                "exposed": True,
+                "host_port": 8322,
+            },
+            {
+                "service": "worker",
+                "container_port": 9000,
+                "protocol": "tcp",
+                "exposed": False,
+                "host_port": None,
+            },
+        ],
+    }
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
 def test_write_failure_preserves_previous_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -219,3 +265,48 @@ def test_write_failure_preserves_previous_snapshot(
         )
 
     assert snapshot.read_text(encoding="utf-8") == "PORT='last-good'\n"
+
+
+def test_configuration_write_restores_environment_when_ports_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".docker-manage/.env"
+    ports_path = tmp_path / ".docker-manage/ports.json"
+    env_path.parent.mkdir()
+    env_path.write_text("PORT='last-good'\n", encoding="utf-8")
+    ports_path.write_text('{"schema_version":1,"ports":[]}\n', encoding="utf-8")
+
+    def fail_ports(_root: Path, _ports: object) -> Path:
+        raise PackageError("ports failed")
+
+    monkeypatch.setattr(
+        "docker_package_app.current_config.write_current_ports",
+        fail_ports,
+    )
+
+    with pytest.raises(PackageError, match="ports failed"):
+        write_current_configuration(
+            tmp_path,
+            (
+                EnvAssignment(
+                    service="web",
+                    container_name="PORT",
+                    artifact_name="PORT",
+                    value="next",
+                ),
+            ),
+            (
+                PortAssignment(
+                    service="web",
+                    container_port=8000,
+                    exposed=True,
+                    host_port=8322,
+                ),
+            ),
+        )
+
+    assert env_path.read_text(encoding="utf-8") == "PORT='last-good'\n"
+    assert ports_path.read_text(encoding="utf-8") == (
+        '{"schema_version":1,"ports":[]}\n'
+    )

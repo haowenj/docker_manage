@@ -22,7 +22,7 @@ from docker_package_app.compose import ComposeDocument
 from docker_package_app.current_config import (
     attach_current_ports,
     attach_current_values,
-    write_current_environment,
+    write_current_configuration,
 )
 from docker_package_app.discovery import (
     DockerFileCandidates,
@@ -479,7 +479,11 @@ def _perform_package(args: argparse.Namespace, paths: WorkPaths) -> dict[str, An
         payload,
         paths.dist / f"{plan.app_name}-{plan.version}.tar.gz",
     )
-    write_current_environment(paths.project_root, plan.environment)
+    write_current_configuration(
+        paths.project_root,
+        plan.environment,
+        plan.ports,
+    )
     state = _transition(state, Stage.PACKAGED, archive=str(archive))
     atomic_write_model(paths.state, state)
     return {

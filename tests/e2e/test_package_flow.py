@@ -114,16 +114,33 @@ def test_successful_package_becomes_next_inspection_current_config(
     assert first.returncode == 0, first.stderr
     snapshot = compose_project / ".docker-manage/.env"
     assert snapshot.read_text(encoding="utf-8") == "PORT='9123'\n"
+    ports_snapshot = compose_project / ".docker-manage/ports.json"
+    assert json.loads(ports_snapshot.read_text(encoding="utf-8"))["ports"] == [
+        {
+            "service": "web",
+            "container_port": 8000,
+            "protocol": "tcp",
+            "exposed": True,
+            "host_port": 8080,
+        }
+    ]
 
     inspected = cli("inspect", str(compose_project), "--json")
     assert inspected.returncode == 0, inspected.stderr
+    inspected_body = json.loads(inspected.stdout)
     question = next(
-        item
-        for item in json.loads(inspected.stdout)["questions"]
-        if item["id"] == "env.web.PORT"
+        item for item in inspected_body["questions"] if item["id"] == "env.web.PORT"
     )
+    port_questions = {
+        item["id"]: item
+        for item in inspected_body["questions"]
+        if item["id"].startswith("port.web.8000/tcp")
+    }
     assert question["default"] == "9123"
     assert "当前配置值：9123" in question["prompt"]
+    assert port_questions["port.web.8000/tcp.expose"]["default"] == "yes"
+    assert port_questions["port.web.8000/tcp.host"]["default"] == "8080"
+    assert "当前配置" in port_questions["port.web.8000/tcp.expose"]["prompt"]
 
 
 def _has_docker_compose() -> bool:
