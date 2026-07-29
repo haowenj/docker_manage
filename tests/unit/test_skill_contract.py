@@ -61,3 +61,20 @@ def test_skill_uses_project_current_environment_snapshot(skill_text: str) -> Non
     )
     for text in required:
         assert text in skill_text
+
+
+def test_skill_uses_current_ports_and_writable_bind_copies(
+    skill_text: str,
+) -> None:
+    required = (
+        ".docker-manage/ports.json",
+        "当前端口配置",
+        "声明端口映射",
+        "优先采用当前端口配置",
+        "不得直接编辑 `.docker-manage/ports.json`",
+        "目录权限为 `0777`",
+        "普通文件权限为 `0666`",
+        "不得修改原项目文件权限",
+    )
+    for text in required:
+        assert text in skill_text
