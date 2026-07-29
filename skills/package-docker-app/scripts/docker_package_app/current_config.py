@@ -5,19 +5,38 @@ import re
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 from dotenv import dotenv_values, set_key
+from pydantic import Field, ValidationError
 
 from docker_package_app.errors import PackageError, UsageError
 from docker_package_app.models import (
+    CurrentPortSelection,
     DefaultValue,
     EnvAssignment,
     EnvCandidate,
+    PortCandidate,
     SourceRef,
+    StrictModel,
 )
 
 CURRENT_ENV_RELATIVE = Path(".docker-manage/.env")
 CURRENT_ENV_SOURCE = CURRENT_ENV_RELATIVE.as_posix()
+CURRENT_PORTS_RELATIVE = Path(".docker-manage/ports.json")
+
+
+class _PortSnapshotEntry(StrictModel):
+    service: str
+    container_port: int = Field(ge=1, le=65535)
+    protocol: Literal["tcp", "udp"]
+    exposed: bool
+    host_port: int | None = Field(default=None, ge=1, le=65535)
+
+
+class _PortSnapshot(StrictModel):
+    schema_version: Literal[1] = 1
+    ports: tuple[_PortSnapshotEntry, ...] = ()
 
 
 def artifact_component(value: str) -> str:
@@ -68,6 +87,53 @@ def attach_current_values(
             )
         )
     return tuple(attached)
+
+
+def attach_current_ports(
+    project_root: Path,
+    candidates: Sequence[PortCandidate],
+) -> tuple[PortCandidate, ...]:
+    snapshot = project_root.resolve() / CURRENT_PORTS_RELATIVE
+    if not snapshot.exists():
+        return tuple(candidates)
+    if not snapshot.is_file():
+        raise UsageError(f"当前端口快照不是普通文件：{snapshot}")
+    try:
+        body = _PortSnapshot.model_validate_json(
+            snapshot.read_text(encoding="utf-8")
+        )
+        identities = [
+            (item.service, item.container_port, item.protocol)
+            for item in body.ports
+        ]
+        if len(identities) != len(set(identities)):
+            raise UsageError(f"当前端口快照包含重复端口：{snapshot}")
+        selections = {
+            (item.service, item.container_port, item.protocol): (
+                CurrentPortSelection(
+                    exposed=item.exposed,
+                    host_port=item.host_port,
+                )
+            )
+            for item in body.ports
+        }
+    except (OSError, ValidationError, ValueError) as exc:
+        raise UsageError(f"当前端口快照无效 {snapshot}：{exc}") from exc
+
+    return tuple(
+        candidate.model_copy(
+            update={
+                "current": selections.get(
+                    (
+                        candidate.service,
+                        candidate.container_port,
+                        candidate.protocol,
+                    )
+                )
+            }
+        )
+        for candidate in candidates
+    )
 
 
 def write_current_environment(

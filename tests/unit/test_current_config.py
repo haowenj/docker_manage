@@ -1,10 +1,13 @@
+import json
 import stat
 from pathlib import Path
 
 import pytest
 from docker_package_app.current_config import (
     CURRENT_ENV_SOURCE,
+    CURRENT_PORTS_RELATIVE,
     artifact_component,
+    attach_current_ports,
     attach_current_values,
     write_current_environment,
 )
@@ -13,6 +16,7 @@ from docker_package_app.models import (
     DefaultValue,
     EnvAssignment,
     EnvCandidate,
+    PortCandidate,
     SourceRef,
 )
 from dotenv import dotenv_values
@@ -83,6 +87,76 @@ def test_matched_key_without_value_is_rejected(tmp_path: Path) -> None:
 def test_artifact_component_matches_existing_service_prefix_rule() -> None:
     assert artifact_component("api-web") == "API_WEB"
     assert artifact_component("worker_2") == "WORKER_2"
+
+
+def test_attach_current_ports_matches_identity_and_ignores_unknown(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / CURRENT_PORTS_RELATIVE
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "ports": [
+                    {
+                        "service": "web",
+                        "container_port": 8000,
+                        "protocol": "tcp",
+                        "exposed": True,
+                        "host_port": 8322,
+                    },
+                    {
+                        "service": "removed",
+                        "container_port": 9000,
+                        "protocol": "tcp",
+                        "exposed": False,
+                        "host_port": None,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidates = (
+        PortCandidate(service="web", container_port=8000, host_port=8080),
+        PortCandidate(service="web", container_port=8000, protocol="udp"),
+    )
+
+    attached = attach_current_ports(tmp_path, candidates)
+
+    assert attached[0].current is not None
+    assert attached[0].current.exposed is True
+    assert attached[0].current.host_port == 8322
+    assert attached[1].current is None
+    assert len(attached) == len(candidates)
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "{",
+        '{"schema_version":2,"ports":[]}',
+        (
+            '{"schema_version":1,"ports":['
+            '{"service":"web","container_port":8000,"protocol":"tcp",'
+            '"exposed":true,"host_port":null}]}'
+        ),
+    ),
+)
+def test_attach_current_ports_rejects_invalid_snapshot(
+    tmp_path: Path,
+    body: str,
+) -> None:
+    snapshot = tmp_path / CURRENT_PORTS_RELATIVE
+    snapshot.parent.mkdir()
+    snapshot.write_text(body, encoding="utf-8")
+
+    with pytest.raises(UsageError, match="当前端口快照"):
+        attach_current_ports(
+            tmp_path,
+            (PortCandidate(service="web", container_port=8000),),
+        )
 
 
 def test_write_current_environment_is_complete_sorted_and_private(

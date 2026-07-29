@@ -2,11 +2,13 @@ from pathlib import Path
 
 import pytest
 from docker_package_app.models import (
+    CurrentPortSelection,
     DefaultValue,
     DiskEstimate,
     EnvCandidate,
     Inspection,
     PackagePlan,
+    PortCandidate,
     SourceRef,
     Stage,
 )
@@ -43,6 +45,25 @@ def test_env_candidate_current_value_is_optional_and_round_trips() -> None:
     )
     restored = EnvCandidate.model_validate_json(
         EnvCandidate(service="web", name="PORT", current=current).model_dump_json()
+    )
+
+    assert restored.current == current
+
+
+def test_port_candidate_current_selection_is_optional_and_round_trips() -> None:
+    old = PortCandidate.model_validate(
+        {"service": "web", "container_port": 8000, "host_port": 8080}
+    )
+    assert old.current is None
+
+    current = CurrentPortSelection(exposed=True, host_port=8322)
+    restored = PortCandidate.model_validate_json(
+        PortCandidate(
+            service="web",
+            container_port=8000,
+            host_port=8080,
+            current=current,
+        ).model_dump_json()
     )
 
     assert restored.current == current

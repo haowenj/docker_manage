@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -58,12 +58,26 @@ class BuildArgCandidate(StrictModel):
     source: SourceRef
 
 
+class CurrentPortSelection(StrictModel):
+    exposed: bool
+    host_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def validate_host_port(self) -> CurrentPortSelection:
+        if self.exposed and self.host_port is None:
+            raise ValueError("已暴露端口必须包含主机端口")
+        if not self.exposed and self.host_port is not None:
+            raise ValueError("未暴露端口不能包含主机端口")
+        return self
+
+
 class PortCandidate(StrictModel):
     service: str
     container_port: int = Field(ge=1, le=65535)
     protocol: Literal["tcp", "udp"] = "tcp"
     host_ip: str | None = None
     host_port: int | None = Field(default=None, ge=1, le=65535)
+    current: CurrentPortSelection | None = None
 
 
 class ImageCandidate(StrictModel):
