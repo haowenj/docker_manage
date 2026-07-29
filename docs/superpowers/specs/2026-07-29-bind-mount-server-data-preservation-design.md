@@ -64,8 +64,10 @@ Docker named volume 目前不会作为文件依赖复制，不受这个问题影
 数据目录必须显式选择 `keep_server_path`。项目外 bind 不设置默认值，继续
 要求明确选择。
 
-Compose `configs.file` 和 `secrets.file` 不新增保留选项，继续自动复制。
-它们不是运行时可写数据目录，并且部署所需文件必须存在于制品中。
+项目目录内的 Compose `configs.file` 和 `secrets.file` 不新增保留选项，
+继续自动复制。它们不是运行时可写数据目录，并且部署所需文件必须存在于制品
+中。项目目录外的 config 和 secret 继续沿用现有安全规则，只允许
+`keep_server_path` 或 `abort`，不得越界复制。
 
 ### 文件身份
 
@@ -83,7 +85,8 @@ Compose `configs.file` 和 `secrets.file` 不新增保留选项，继续自动�
 
 - 将复制进归档的 bind、config 和 secret。
 - 保留服务器路径的 bind。
-- 因选择 `abort` 而终止的路径。
+
+选择 `abort` 时不生成最终计划，CLI 直接返回包含该路径的中文中止错误。
 
 `keep_server_path` 选择必须参与 `plan_hash`，用户确认后不能在打包阶段被
 静默改变。
