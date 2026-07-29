@@ -19,6 +19,7 @@ from docker_package_app.artifact import (
 )
 from docker_package_app.command import CommandRunner
 from docker_package_app.compose import ComposeDocument
+from docker_package_app.current_config import attach_current_values
 from docker_package_app.discovery import (
     DockerFileCandidates,
     default_identity,
@@ -358,6 +359,11 @@ def _perform_inspect(
             )
             _store_initial(paths, inspection)
             return _inspection_result(inspection, extra_questions), EXIT_MODEL_REQUIRED
+    inspection = inspection.model_copy(
+        update={
+            "env": attach_current_values(project, inspection.env),
+        }
+    )
     questions = (*build_questions(inspection), *extra_questions)
     _store_initial(paths, inspection)
     return _inspection_result(inspection, questions), EXIT_OK

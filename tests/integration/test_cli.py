@@ -47,6 +47,61 @@ def test_noninteractive_plan_rejects_missing_answers(
     assert "缺少答案" in result.stderr
 
 
+def test_inspect_and_plan_use_current_environment_snapshot(
+    cli: CliRunner,
+    compose_project: Path,
+) -> None:
+    snapshot = compose_project / ".docker-manage/.env"
+    snapshot.parent.mkdir()
+    snapshot.write_text("PORT='9123'\nUNKNOWN='ignored'\n", encoding="utf-8")
+
+    inspected = cli("inspect", str(compose_project), "--json")
+
+    assert inspected.returncode == 0, inspected.stderr
+    body = json.loads(inspected.stdout)
+    assert [(item["service"], item["name"]) for item in body["env"]] == [
+        ("web", "PORT")
+    ]
+    assert body["env"][0]["current"] == {
+        "value": "9123",
+        "source": {"path": ".docker-manage/.env", "line": None},
+    }
+    env_question = next(
+        question for question in body["questions"] if question["id"] == "env.web.PORT"
+    )
+    assert env_question["default"] == "9123"
+    assert "当前配置值：9123" in env_question["prompt"]
+
+    answers = compose_project / "current-answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "env.web.PORT": env_question["default"],
+                    "port.web.8000/tcp.expose": "yes",
+                    "port.web.8000/tcp.host": "8080",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    answers.chmod(0o600)
+    planned = cli(
+        "plan",
+        str(compose_project),
+        "--run-id",
+        body["run_id"],
+        "--non-interactive",
+        "--answers",
+        str(answers),
+        "--json",
+    )
+
+    assert planned.returncode == 0, planned.stderr
+    environment = json.loads(planned.stdout)["plan"]["environment"]
+    assert environment[0]["value"] == "9123"
+
+
 def test_dry_run_stops_before_docker_mutations(
     cli: CliRunner,
     compose_project: Path,

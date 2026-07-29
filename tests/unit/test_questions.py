@@ -57,10 +57,81 @@ def test_questions_show_conflicting_secret_defaults() -> None:
     assert "secret-two" in question.prompt
     assert format_environment_questions((question,)) == (
         (
-            "1. 设置 web.API_KEY。默认值来源：.env:1=secret-one, "
+            "1. 设置 web.API_KEY。声明默认值来源：.env:1=secret-one, "
             "app.py:4=secret-two，必填，默认值冲突"
         ),
     )
+
+
+def test_current_value_becomes_default_without_hiding_declared_defaults() -> None:
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        env=(
+            EnvCandidate(
+                service="web",
+                name="PORT",
+                current=DefaultValue(
+                    value="8322",
+                    source=SourceRef(path=".docker-manage/.env"),
+                ),
+                defaults=(
+                    DefaultValue(
+                        value="8000",
+                        source=SourceRef(path="app.py", line=2),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    question = build_questions(inspection)[0]
+
+    assert question.default == "8322"
+    assert "当前配置值：8322" in question.prompt
+    assert "来源：.docker-manage/.env" in question.prompt
+    assert "声明默认值来源：app.py:2=8000" in question.prompt
+    assert format_environment_questions((question,)) == (
+        (
+            "1. 设置 web.PORT。当前配置值：8322，来源：.docker-manage/.env。"
+            "声明默认值来源：app.py:2=8000，默认值：8322"
+        ),
+    )
+    assert parse_environment_overrides((question,), ("无修改",)) == {
+        "env.web.PORT": "8322"
+    }
+
+
+def test_empty_current_value_remains_a_valid_default() -> None:
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        env=(
+            EnvCandidate(
+                service="web",
+                name="OPTIONAL_VALUE",
+                current=DefaultValue(
+                    value="",
+                    source=SourceRef(path=".docker-manage/.env"),
+                ),
+                defaults=(
+                    DefaultValue(
+                        value="fallback",
+                        source=SourceRef(path="app.py", line=3),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    question = build_questions(inspection)[0]
+
+    assert question.default == ""
+    assert parse_environment_overrides((question,), ("无修改",)) == {
+        "env.web.OPTIONAL_VALUE": ""
+    }
 
 
 def test_environment_overrides_fill_omitted_defaults() -> None:

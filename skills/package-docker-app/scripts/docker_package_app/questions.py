@@ -15,14 +15,25 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
     questions: list[Question] = []
     for candidate in sorted(inspection.env, key=lambda item: (item.service, item.name)):
         values = sorted({item.value for item in candidate.defaults})
-        default = values[0] if len(values) == 1 else None
+        default = (
+            candidate.current.value
+            if candidate.current is not None
+            else values[0]
+            if len(values) == 1
+            else None
+        )
         source_text = ", ".join(
             f"{item.source.path}:{item.source.line or '-'}={item.value}"
             for item in candidate.defaults
         )
         prompt = f"设置 {candidate.service}.{candidate.name}"
+        if candidate.current is not None:
+            prompt += (
+                f"。当前配置值：{candidate.current.value}，"
+                f"来源：{candidate.current.source.path}"
+            )
         if source_text:
-            prompt += f"。默认值来源：{source_text}"
+            prompt += f"。声明默认值来源：{source_text}"
         questions.append(
             Question(
                 id=f"env.{candidate.service}.{candidate.name}",
@@ -118,7 +129,7 @@ def format_environment_questions(
     for index, question in enumerate(environment_questions(questions), start=1):
         if question.default is not None:
             suffix = f"，默认值：{question.default}"
-        elif "默认值来源：" in question.prompt:
+        elif "声明默认值来源：" in question.prompt:
             suffix = "，必填，默认值冲突"
         else:
             suffix = "，必填，无默认值"
