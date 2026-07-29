@@ -69,7 +69,7 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         "docker-manage/demo/worker:v1",
     ]
     assert output["reused_images"] == ["registry.intra/redis:7-approved"]
-    assert output["server_paths"] == [str((project / "data").resolve())]
+    assert output["server_paths"] == ["./files/data"]
     with tarfile.open(archive_path, "r:gz") as bundle:
         compose = yaml.safe_load(bundle.extractfile("compose.yaml"))
         assert all(
@@ -85,18 +85,18 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         )
         volumes = compose["services"]["web"]["volumes"]
         assert volumes[0]["source"] == "./files/config"
-        assert volumes[1]["source"] == "./data"
+        assert volumes[1]["source"] == "./files/data"
         assert bundle.getmember("files/config/app.ini").size > 0
         assert bundle.getmember("files/config").mode == 0o777
         assert bundle.getmember("files/config/app.ini").mode == 0o666
         assert bundle.getmember("manifest.json").size > 0
         assert bundle.getmember("checksums.sha256").size > 0
         manifest = json.load(bundle.extractfile("manifest.json"))
-        assert manifest["server_paths"] == [str((project / "data").resolve())]
+        assert manifest["server_paths"] == ["./files/data"]
 
     deployment = tmp_path / "server-deployment"
-    (deployment / "data").mkdir(parents=True)
-    (deployment / "data/server.db").write_text(
+    (deployment / "files/data").mkdir(parents=True)
+    (deployment / "files/data/server.db").write_text(
         "existing-test-data",
         encoding="utf-8",
     )
@@ -110,9 +110,9 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         bundle.extractall(deployment)
 
     assert (
-        deployment / "data/server.db"
+        deployment / "files/data/server.db"
     ).read_text(encoding="utf-8") == "existing-test-data"
-    assert not (deployment / "data/local.db").exists()
+    assert not (deployment / "files/data/local.db").exists()
     assert (
         deployment / "files/config/app.ini"
     ).read_text(encoding="utf-8") != "old-config"

@@ -64,6 +64,7 @@ def materialize_files(
     candidates: Sequence[FileCandidate],
     assignments: Sequence[FileAssignment],
     payload_root: Path,
+    project_root: Path,
 ) -> FileMaterialization:
     assignment_by_identity = {
         _assignment_identity(item): item
@@ -76,6 +77,7 @@ def materialize_files(
     copied_sources: set[str] = set()
     bind_destinations: set[Path] = set()
     copied_bytes = 0
+    project = project_root.resolve()
 
     for candidate in sorted(candidates, key=lambda item: item.resolved_path):
         assignment = assignment_by_identity.get(_candidate_identity(candidate))
@@ -86,7 +88,14 @@ def materialize_files(
             )
         action = assignment.action
         if action is FileAction.KEEP_SERVER_PATH:
-            server_paths.add(candidate.resolved_path)
+            server_source = deployment_source(
+                project,
+                candidate.resolved_path,
+                candidate.compose_value,
+            )
+            server_paths.add(server_source)
+            if candidate.kind == "bind" and candidate.inside_project:
+                rewrites[_rewrite_key(candidate)] = server_source
             continue
         if not candidate.inside_project or not candidate.project_path:
             raise PackageError(
@@ -106,8 +115,10 @@ def materialize_files(
             copied_bytes += candidate.estimated_size
         if candidate.kind == "bind":
             bind_destinations.add(destination)
-        rewrites[_rewrite_key(candidate)] = (
-            f"./files/{Path(candidate.project_path).as_posix()}"
+        rewrites[_rewrite_key(candidate)] = deployment_source(
+            project,
+            candidate.resolved_path,
+            candidate.compose_value,
         )
 
     for destination in sorted(bind_destinations):
@@ -118,6 +129,20 @@ def materialize_files(
         server_paths=tuple(sorted(server_paths)),
         copied_bytes=copied_bytes,
     )
+
+
+def deployment_source(
+    project_root: Path,
+    resolved_path: str,
+    original_value: str,
+) -> str:
+    root = project_root.resolve()
+    resolved = Path(resolved_path).resolve()
+    if resolved.is_relative_to(root):
+        relative = resolved.relative_to(root)
+        project_path = relative if relative.parts else Path("project")
+        return f"./files/{project_path.as_posix()}"
+    return original_value
 
 
 def _candidate_identity(candidate: FileCandidate) -> FileIdentity:

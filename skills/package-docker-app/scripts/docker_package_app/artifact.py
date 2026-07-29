@@ -16,6 +16,7 @@ from uuid import uuid4
 from docker_package_app import ARTIFACT_SCHEMA_VERSION, CLI_VERSION
 from docker_package_app.docker import ImageMetadata
 from docker_package_app.errors import ArtifactVerificationError
+from docker_package_app.files import deployment_source
 from docker_package_app.models import FileAction, ImageAction, PackagePlan, StrictModel
 
 HASH_CHUNK_BYTES = 1024 * 1024
@@ -122,7 +123,11 @@ def build_manifest(
         server_paths=tuple(
             sorted(
                 {
-                    item.resolved_path
+                    deployment_source(
+                        Path(plan.project_root),
+                        item.resolved_path,
+                        item.original_value,
+                    )
                     for item in plan.files
                     if item.action is FileAction.KEEP_SERVER_PATH
                 }

@@ -61,6 +61,7 @@ def test_project_relative_bind_is_copied_without_tool_state(tmp_path: Path) -> N
         candidates,
         tuple(_assignment(item, FileAction.COPY) for item in candidates),
         tmp_path / "payload",
+        tmp_path,
     )
 
     assert bind.inside_project is True
@@ -79,7 +80,7 @@ def test_symlink_outside_project_requires_server_path_decision(tmp_path: Path) -
 
     assert bind.inside_project is False
     with pytest.raises(AnswerRequired):
-        materialize_files(candidates, {}, tmp_path / "payload")
+        materialize_files(candidates, {}, tmp_path / "payload", tmp_path)
 
     result = materialize_files(
         candidates,
@@ -93,8 +94,9 @@ def test_symlink_outside_project_requires_server_path_decision(tmp_path: Path) -
             for item in candidates
         ),
         tmp_path / "payload",
+        tmp_path,
     )
-    assert result.server_paths == (str(outside.resolve()),)
+    assert result.server_paths == ("./secret-link",)
 
 
 def test_copied_bind_is_world_readable_and_writable_recursively(
@@ -118,6 +120,7 @@ def test_copied_bind_is_world_readable_and_writable_recursively(
         (candidate,),
         (_assignment(candidate, FileAction.COPY),),
         tmp_path / "payload",
+        tmp_path,
     )
 
     copied = tmp_path / "payload/files/config"
@@ -159,6 +162,7 @@ def test_copied_config_permissions_are_preserved(tmp_path: Path) -> None:
         candidates,
         tuple(_assignment(item, FileAction.COPY) for item in candidates),
         tmp_path / "payload",
+        tmp_path,
     )
 
     assert stat.S_IMODE(
@@ -166,7 +170,7 @@ def test_copied_config_permissions_are_preserved(tmp_path: Path) -> None:
     ) == 0o600
 
 
-def test_kept_project_bind_is_not_materialized_or_rewritten(
+def test_kept_project_bind_uses_stable_deployment_source_without_copying(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "data"
@@ -186,11 +190,14 @@ def test_kept_project_bind_is_not_materialized_or_rewritten(
         (candidate,),
         (_assignment(candidate, FileAction.KEEP_SERVER_PATH),),
         tmp_path / "payload",
+        tmp_path,
     )
 
     assert not (tmp_path / "payload/files/data").exists()
-    assert result.rewrites == {}
-    assert result.server_paths == (str(source.resolve()),)
+    assert result.rewrites == {
+        ("web", "bind", "./data"): "./files/data",
+    }
+    assert result.server_paths == ("./files/data",)
     assert result.copied_bytes == 0
 
 
@@ -229,10 +236,17 @@ def test_same_source_bind_can_be_kept_while_config_is_copied(
         for item in candidates
     )
 
-    result = materialize_files(candidates, assignments, tmp_path / "payload")
+    result = materialize_files(
+        candidates,
+        assignments,
+        tmp_path / "payload",
+        tmp_path,
+    )
 
     assert (tmp_path / "payload/files/shared.ini").is_file()
-    assert ("web", "bind", "./shared.ini") not in result.rewrites
+    assert result.rewrites[
+        ("web", "bind", "./shared.ini")
+    ] == "./files/shared.ini"
     assert result.rewrites[("web", "config", "./shared.ini")] == "./files/shared.ini"
 
 

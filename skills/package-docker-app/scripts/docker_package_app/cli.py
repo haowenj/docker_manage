@@ -435,6 +435,7 @@ def _perform_package(args: argparse.Namespace, paths: WorkPaths) -> dict[str, An
         state.inspection.files,
         plan.files,
         payload,
+        paths.project_root,
     )
     rendered = render_deployment(compose, plan, materialized.rewrites)
     env_values = {item.artifact_name: item.value for item in plan.environment}
