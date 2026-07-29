@@ -74,6 +74,8 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         assert "ports" not in compose["services"]["worker"]
         assert compose["services"]["web"]["volumes"][0]["source"] == "./files/config"
         assert bundle.getmember("files/config/app.ini").size > 0
+        assert bundle.getmember("files/config").mode == 0o777
+        assert bundle.getmember("files/config/app.ini").mode == 0o666
         assert bundle.getmember("manifest.json").size > 0
         assert bundle.getmember("checksums.sha256").size > 0
 

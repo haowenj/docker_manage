@@ -68,6 +68,7 @@ def materialize_files(
     rewrites: dict[str, str] = {}
     server_paths: set[str] = set()
     copied_sources: set[str] = set()
+    bind_destinations: set[Path] = set()
     copied_bytes = 0
 
     for candidate in sorted(candidates, key=lambda item: item.resolved_path):
@@ -97,7 +98,12 @@ def materialize_files(
             _copy_dependency(source, destination)
             copied_sources.add(candidate.resolved_path)
             copied_bytes += candidate.estimated_size
+        if candidate.kind == "bind":
+            bind_destinations.add(destination)
         rewrites[candidate.compose_value] = f"./files/{Path(candidate.project_path).as_posix()}"
+
+    for destination in sorted(bind_destinations):
+        _make_bind_writable(destination)
 
     return FileMaterialization(
         rewrites=rewrites,
@@ -179,6 +185,34 @@ def _copy_dependency(source: Path, destination: Path) -> None:
         dirs_exist_ok=True,
         ignore=lambda _path, names: [name for name in names if name == ".docker-manage"],
     )
+
+
+def _make_bind_writable(path: Path) -> None:
+    try:
+        if path.is_symlink():
+            return
+        if path.is_file():
+            path.chmod(0o666)
+            return
+        if not path.is_dir():
+            raise PackageError(f"bind mount 副本不是普通文件或目录：{path}")
+        for root, directories, files in os.walk(path, followlinks=False):
+            current = Path(root)
+            current.chmod(0o777)
+            for name in directories:
+                child = current / name
+                if not child.is_symlink():
+                    child.chmod(0o777)
+            for name in files:
+                child = current / name
+                if not child.is_symlink():
+                    if not child.is_file():
+                        raise PackageError(
+                            f"bind mount 副本包含非普通文件：{child}"
+                        )
+                    child.chmod(0o666)
+    except OSError as exc:
+        raise PackageError(f"无法设置 bind mount 副本权限 {path}：{exc}") from exc
 
 
 def _validate_directory_symlinks(source: Path) -> None:
