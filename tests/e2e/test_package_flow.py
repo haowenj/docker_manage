@@ -78,6 +78,54 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         assert bundle.getmember("checksums.sha256").size > 0
 
 
+def test_successful_package_becomes_next_inspection_current_config(
+    cli: CliRunner,
+    compose_project: Path,
+) -> None:
+    first_answers = compose_project / "first-answers.json"
+    first_answers.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "env.web.PORT": "9123",
+                    "port.web.8000/tcp.expose": "yes",
+                    "port.web.8000/tcp.host": "8080",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    first_answers.chmod(0o600)
+
+    first = cli(
+        "run",
+        str(compose_project),
+        "--non-interactive",
+        "--answers",
+        str(first_answers),
+        "--app-name",
+        "snapshot-app",
+        "--version",
+        "v1",
+        "--json",
+        env={"FAKE_DOCKER_INSPECT": json.dumps([_metadata("sha256:web-v1")])},
+    )
+
+    assert first.returncode == 0, first.stderr
+    snapshot = compose_project / ".docker-manage/.env"
+    assert snapshot.read_text(encoding="utf-8") == "PORT='9123'\n"
+
+    inspected = cli("inspect", str(compose_project), "--json")
+    assert inspected.returncode == 0, inspected.stderr
+    question = next(
+        item
+        for item in json.loads(inspected.stdout)["questions"]
+        if item["id"] == "env.web.PORT"
+    )
+    assert question["default"] == "9123"
+    assert "当前配置值：9123" in question["prompt"]
+
+
 def _has_docker_compose() -> bool:
     docker = shutil.which("docker")
     if docker is None:

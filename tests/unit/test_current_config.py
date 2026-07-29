@@ -1,13 +1,21 @@
 from pathlib import Path
+import stat
 
 import pytest
+from dotenv import dotenv_values
 from docker_package_app.current_config import (
     CURRENT_ENV_SOURCE,
     artifact_component,
     attach_current_values,
+    write_current_environment,
 )
-from docker_package_app.errors import UsageError
-from docker_package_app.models import DefaultValue, EnvCandidate, SourceRef
+from docker_package_app.errors import PackageError, UsageError
+from docker_package_app.models import (
+    DefaultValue,
+    EnvAssignment,
+    EnvCandidate,
+    SourceRef,
+)
 
 
 def _candidate(service: str, name: str, default: str = "declared") -> EnvCandidate:
@@ -75,3 +83,65 @@ def test_matched_key_without_value_is_rejected(tmp_path: Path) -> None:
 def test_artifact_component_matches_existing_service_prefix_rule() -> None:
     assert artifact_component("api-web") == "API_WEB"
     assert artifact_component("worker_2") == "WORKER_2"
+
+
+def test_write_current_environment_is_complete_sorted_and_private(
+    tmp_path: Path,
+) -> None:
+    previous = tmp_path / ".docker-manage/.env"
+    previous.parent.mkdir()
+    previous.write_text("STALE='remove-me'\n", encoding="utf-8")
+
+    path = write_current_environment(
+        tmp_path,
+        (
+            EnvAssignment(
+                service="web",
+                container_name="PORT",
+                artifact_name="PORT",
+                value="8322",
+            ),
+            EnvAssignment(
+                service="web",
+                container_name="API_KEY",
+                artifact_name="API_KEY",
+                value="secret",
+            ),
+        ),
+    )
+
+    assert path == tmp_path / ".docker-manage/.env"
+    assert dotenv_values(path) == {"API_KEY": "secret", "PORT": "8322"}
+    assert path.read_text(encoding="utf-8").splitlines() == [
+        "API_KEY='secret'",
+        "PORT='8322'",
+    ]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_write_failure_preserves_previous_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = tmp_path / ".docker-manage/.env"
+    snapshot.parent.mkdir()
+    snapshot.write_text("PORT='last-good'\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "docker_package_app.current_config.os.replace",
+        lambda _source, _target: (_ for _ in ()).throw(OSError("replace failed")),
+    )
+
+    with pytest.raises(PackageError, match="无法更新当前环境变量快照"):
+        write_current_environment(
+            tmp_path,
+            (
+                EnvAssignment(
+                    service="web",
+                    container_name="PORT",
+                    artifact_name="PORT",
+                    value="next",
+                ),
+            ),
+        )
+
+    assert snapshot.read_text(encoding="utf-8") == "PORT='last-good'\n"

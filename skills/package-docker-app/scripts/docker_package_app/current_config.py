@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import re
+import os
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from dotenv import dotenv_values
+from dotenv import dotenv_values, set_key
 
-from docker_package_app.errors import UsageError
-from docker_package_app.models import DefaultValue, EnvCandidate, SourceRef
+from docker_package_app.errors import PackageError, UsageError
+from docker_package_app.models import (
+    DefaultValue,
+    EnvAssignment,
+    EnvCandidate,
+    SourceRef,
+)
 
 CURRENT_ENV_RELATIVE = Path(".docker-manage/.env")
 CURRENT_ENV_SOURCE = CURRENT_ENV_RELATIVE.as_posix()
@@ -61,3 +68,45 @@ def attach_current_values(
             )
         )
     return tuple(attached)
+
+
+def write_current_environment(
+    project_root: Path,
+    assignments: Sequence[EnvAssignment],
+) -> Path:
+    target = project_root.resolve() / CURRENT_ENV_RELATIVE
+    temporary: Path | None = None
+    values = {
+        assignment.artifact_name: assignment.value
+        for assignment in assignments
+    }
+    try:
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target.parent.chmod(0o700)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+        for name in sorted(values):
+            set_key(
+                temporary,
+                name,
+                values[name],
+                quote_mode="always",
+            )
+        temporary.chmod(0o600)
+        with temporary.open("rb+") as handle:
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        temporary = None
+        return target
+    except OSError as exc:
+        raise PackageError(f"无法更新当前环境变量快照 {target}：{exc}") from exc
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()

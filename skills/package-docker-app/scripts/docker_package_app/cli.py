@@ -19,7 +19,10 @@ from docker_package_app.artifact import (
 )
 from docker_package_app.command import CommandRunner
 from docker_package_app.compose import ComposeDocument
-from docker_package_app.current_config import attach_current_values
+from docker_package_app.current_config import (
+    attach_current_values,
+    write_current_environment,
+)
 from docker_package_app.discovery import (
     DockerFileCandidates,
     default_identity,
@@ -474,6 +477,7 @@ def _perform_package(args: argparse.Namespace, paths: WorkPaths) -> dict[str, An
         payload,
         paths.dist / f"{plan.app_name}-{plan.version}.tar.gz",
     )
+    write_current_environment(paths.project_root, plan.environment)
     state = _transition(state, Stage.PACKAGED, archive=str(archive))
     atomic_write_model(paths.state, state)
     return {

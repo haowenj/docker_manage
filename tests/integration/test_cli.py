@@ -107,6 +107,10 @@ def test_dry_run_stops_before_docker_mutations(
     compose_project: Path,
     complete_answers: Path,
 ) -> None:
+    snapshot = compose_project / ".docker-manage/.env"
+    snapshot.parent.mkdir()
+    snapshot.write_text("PORT='last-good'\n", encoding="utf-8")
+
     result = cli(
         "run",
         str(compose_project),
@@ -119,12 +123,66 @@ def test_dry_run_stops_before_docker_mutations(
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["stage"] == "planned"
+    assert snapshot.read_text(encoding="utf-8") == "PORT='last-good'\n"
     mutations = {
         ("compose", "build"),
         ("pull", "--platform"),
         ("image", "save"),
     }
     assert all(tuple(call[:2]) not in mutations for call in cli.docker_log())
+
+
+def test_failed_package_does_not_replace_current_environment(
+    cli: CliRunner,
+    compose_project: Path,
+) -> None:
+    snapshot = compose_project / ".docker-manage/.env"
+    snapshot.parent.mkdir()
+    snapshot.write_text("PORT='last-good'\n", encoding="utf-8")
+    answers = compose_project / "failed-package-answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "env.web.PORT": "next",
+                    "port.web.8000/tcp.expose": "yes",
+                    "port.web.8000/tcp.host": "8080",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    answers.chmod(0o600)
+    inspected = cli("inspect", str(compose_project), "--json")
+    run_id = json.loads(inspected.stdout)["run_id"]
+    planned = cli(
+        "plan",
+        str(compose_project),
+        "--run-id",
+        run_id,
+        "--non-interactive",
+        "--answers",
+        str(answers),
+        "--json",
+    )
+    plan_hash = json.loads(planned.stdout)["plan_hash"]
+
+    packaged = cli(
+        "package",
+        str(compose_project),
+        "--run-id",
+        run_id,
+        "--non-interactive",
+        "--answers",
+        str(answers),
+        "--confirm-plan-hash",
+        plan_hash,
+        "--json",
+        env={"FAKE_DOCKER_EXIT": "23"},
+    )
+
+    assert packaged.returncode == 1
+    assert snapshot.read_text(encoding="utf-8") == "PORT='last-good'\n"
 
 
 def test_package_rejects_wrong_plan_hash_before_docker_mutation(
