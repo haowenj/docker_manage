@@ -80,10 +80,7 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         assert "ports" not in compose["services"]["worker"]
         names = set(bundle.getnames())
         assert not any(
-            name == "data"
-            or name.startswith("data/")
-            or name == "files/data"
-            or name.startswith("files/data/")
+            name == "data" or name.startswith(("data/", "files/data",))
             for name in names
         )
         volumes = compose["services"]["web"]["volumes"]
