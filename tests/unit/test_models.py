@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 from docker_package_app.models import (
+    DefaultValue,
     DiskEstimate,
     EnvCandidate,
     Inspection,
@@ -30,6 +31,21 @@ def test_inspection_round_trips_with_schema_version() -> None:
 
     assert restored == inspection
     assert restored.schema_version == 1
+
+
+def test_env_candidate_current_value_is_optional_and_round_trips() -> None:
+    old = EnvCandidate.model_validate({"service": "web", "name": "PORT"})
+    assert old.current is None
+
+    current = DefaultValue(
+        value="8322",
+        source=SourceRef(path=".docker-manage/.env"),
+    )
+    restored = EnvCandidate.model_validate_json(
+        EnvCandidate(service="web", name="PORT", current=current).model_dump_json()
+    )
+
+    assert restored.current == current
 
 
 def test_models_reject_unknown_fields() -> None:

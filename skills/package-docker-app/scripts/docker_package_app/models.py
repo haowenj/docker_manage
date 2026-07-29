@@ -48,6 +48,7 @@ class EnvCandidate(StrictModel):
     name: str
     defaults: tuple[DefaultValue, ...] = ()
     sources: tuple[SourceRef, ...] = ()
+    current: DefaultValue | None = None
 
 
 class BuildArgCandidate(StrictModel):

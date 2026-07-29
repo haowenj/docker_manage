@@ -5,6 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from docker_package_app.errors import AnswerRequired, PlanValidationError
+from docker_package_app.current_config import artifact_component
 from docker_package_app.models import (
     AnswerBook,
     BuildArgAssignment,
@@ -103,7 +104,7 @@ def _build_environment(
         for service, value in sorted(service_values):
             artifact_name = name
             if len(distinct_values) > 1:
-                artifact_name = f"{_env_component(service)}_{name}"
+                artifact_name = f"{artifact_component(service)}_{name}"
             assignments.append(
                 EnvAssignment(
                     service=service,
@@ -243,7 +244,3 @@ def _validate_identity(app_name: str, version: str, platform: str) -> None:
         raise PlanValidationError(f"版本标签无效：{version}")
     if not PLATFORM_PATTERN.fullmatch(platform):
         raise PlanValidationError(f"目标平台无效：{platform}")
-
-
-def _env_component(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()
