@@ -4,8 +4,8 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from docker_package_app.errors import AnswerRequired, PlanValidationError
 from docker_package_app.current_config import artifact_component
+from docker_package_app.errors import AnswerRequired, PlanValidationError
 from docker_package_app.models import (
     AnswerBook,
     BuildArgAssignment,

@@ -1,8 +1,7 @@
-from pathlib import Path
 import stat
+from pathlib import Path
 
 import pytest
-from dotenv import dotenv_values
 from docker_package_app.current_config import (
     CURRENT_ENV_SOURCE,
     artifact_component,
@@ -16,6 +15,7 @@ from docker_package_app.models import (
     EnvCandidate,
     SourceRef,
 )
+from dotenv import dotenv_values
 
 
 def _candidate(service: str, name: str, default: str = "declared") -> EnvCandidate:

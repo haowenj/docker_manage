@@ -47,3 +47,17 @@ def test_skill_preserves_machine_protocol_and_raw_tool_output(skill_text: str) -
 def test_skill_has_no_template_markers(skill_text: str) -> None:
     for marker in ("[TO" + "DO", "TO" + "DO:", "T" + "BD", "PLACE" + "HOLDER"):
         assert marker not in skill_text
+
+
+def test_skill_uses_project_current_environment_snapshot(skill_text: str) -> None:
+    required = (
+        ".docker-manage/.env",
+        "当前配置值",
+        "声明默认值",
+        "优先采用当前配置值",
+        "只有完整成功打包后",
+        "不得直接编辑 `.docker-manage/.env`",
+        "不得从历史 `state.json`",
+    )
+    for text in required:
+        assert text in skill_text

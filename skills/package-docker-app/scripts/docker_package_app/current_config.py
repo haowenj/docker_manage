@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import re
 import os
+import re
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
