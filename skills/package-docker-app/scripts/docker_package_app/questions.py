@@ -61,15 +61,36 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
         key=lambda item: (item.service, item.container_port, item.protocol),
     ):
         prefix = f"port.{port.service}.{port.container_port}/{port.protocol}"
+        current = port.current
+        declared_exposed = port.host_port is not None
+        exposed = current.exposed if current is not None else declared_exposed
+        host_port = (
+            current.host_port
+            if current is not None and current.exposed
+            else port.host_port or port.container_port
+        )
+        current_text = ""
+        if current is not None:
+            current_text = (
+                f" 当前配置：已暴露，主机端口 {current.host_port}；"
+                if current.exposed
+                else " 当前配置：不暴露；"
+            )
+        declared_text = (
+            f"声明映射：主机端口 {port.host_port}。"
+            if declared_exposed
+            else "声明映射：不暴露。"
+        )
         questions.append(
             Question(
                 id=f"{prefix}.expose",
                 kind="port_expose",
                 prompt=(
                     f"是否暴露 {port.service} 的容器端口 "
-                    f"{port.container_port}/{port.protocol}？（yes=是，no=否）"
+                    f"{port.container_port}/{port.protocol}？"
+                    f"{current_text}{declared_text}（yes=是，no=否）"
                 ),
-                default="yes" if port.host_port else "no",
+                default="yes" if exposed else "no",
                 choices=("yes", "no"),
             )
         )
@@ -81,7 +102,7 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
                     f"设置 {port.service}:{port.container_port}/{port.protocol} "
                     "对应的主机端口"
                 ),
-                default=str(port.host_port or port.container_port),
+                default=str(host_port),
             )
         )
 

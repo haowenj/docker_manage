@@ -1,9 +1,11 @@
 import pytest
 from docker_package_app.errors import AnswerRequired, PlanValidationError
 from docker_package_app.models import (
+    CurrentPortSelection,
     DefaultValue,
     EnvCandidate,
     Inspection,
+    PortCandidate,
     Question,
     SourceRef,
     Stage,
@@ -132,6 +134,40 @@ def test_empty_current_value_remains_a_valid_default() -> None:
     assert parse_environment_overrides((question,), ("无修改",)) == {
         "env.web.OPTIONAL_VALUE": ""
     }
+
+
+def test_current_port_selection_precedes_declared_mapping() -> None:
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        ports=(
+            PortCandidate(
+                service="web",
+                container_port=8000,
+                host_port=8080,
+                current=CurrentPortSelection(exposed=True, host_port=8322),
+            ),
+            PortCandidate(
+                service="worker",
+                container_port=9000,
+                host_port=9090,
+                current=CurrentPortSelection(exposed=False, host_port=None),
+            ),
+        ),
+    )
+
+    questions = {item.id: item for item in build_questions(inspection)}
+
+    web_expose = questions["port.web.8000/tcp.expose"]
+    web_host = questions["port.web.8000/tcp.host"]
+    worker_expose = questions["port.worker.9000/tcp.expose"]
+    assert web_expose.default == "yes"
+    assert web_host.default == "8322"
+    assert worker_expose.default == "no"
+    assert "当前配置：已暴露，主机端口 8322" in web_expose.prompt
+    assert "声明映射：主机端口 8080" in web_expose.prompt
+    assert "当前配置：不暴露" in worker_expose.prompt
 
 
 def test_environment_overrides_fill_omitted_defaults() -> None:

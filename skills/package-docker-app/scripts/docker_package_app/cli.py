@@ -20,6 +20,7 @@ from docker_package_app.artifact import (
 from docker_package_app.command import CommandRunner
 from docker_package_app.compose import ComposeDocument
 from docker_package_app.current_config import (
+    attach_current_ports,
     attach_current_values,
     write_current_environment,
 )
@@ -365,6 +366,7 @@ def _perform_inspect(
     inspection = inspection.model_copy(
         update={
             "env": attach_current_values(project, inspection.env),
+            "ports": attach_current_ports(project, inspection.ports),
         }
     )
     questions = (*build_questions(inspection), *extra_questions)

@@ -102,6 +102,69 @@ def test_inspect_and_plan_use_current_environment_snapshot(
     assert environment[0]["value"] == "9123"
 
 
+def test_inspect_and_plan_use_current_port_snapshot(
+    cli: CliRunner,
+    compose_project: Path,
+) -> None:
+    snapshot = compose_project / ".docker-manage/ports.json"
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "ports": [
+                    {
+                        "service": "web",
+                        "container_port": 8000,
+                        "protocol": "tcp",
+                        "exposed": True,
+                        "host_port": 8322,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inspected = cli("inspect", str(compose_project), "--json")
+
+    assert inspected.returncode == 0, inspected.stderr
+    body = json.loads(inspected.stdout)
+    port = body["ports"][0]
+    assert port["current"] == {"exposed": True, "host_port": 8322}
+    questions = {item["id"]: item for item in body["questions"]}
+    assert questions["port.web.8000/tcp.expose"]["default"] == "yes"
+    assert questions["port.web.8000/tcp.host"]["default"] == "8322"
+
+    answers = compose_project / "current-port-answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "env.web.PORT": "8000",
+                    "port.web.8000/tcp.expose": "yes",
+                    "port.web.8000/tcp.host": "8322",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    answers.chmod(0o600)
+    planned = cli(
+        "plan",
+        str(compose_project),
+        "--run-id",
+        body["run_id"],
+        "--non-interactive",
+        "--answers",
+        str(answers),
+        "--json",
+    )
+
+    assert planned.returncode == 0, planned.stderr
+    assert json.loads(planned.stdout)["plan"]["ports"][0]["host_port"] == 8322
+
+
 def test_dry_run_stops_before_docker_mutations(
     cli: CliRunner,
     compose_project: Path,
