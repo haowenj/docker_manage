@@ -60,6 +60,7 @@ def test_compose_classifies_build_before_image() -> None:
             "--format",
             "json",
             "--no-interpolate",
+            "--no-path-resolution",
         ]
     ]
 

@@ -43,7 +43,15 @@ class ComposeDocument:
             argv.extend(["-f", str(path)])
         for profile in profiles:
             argv.extend(["--profile", profile])
-        argv.extend(["config", "--format", "json", "--no-interpolate"])
+        argv.extend(
+            [
+                "config",
+                "--format",
+                "json",
+                "--no-interpolate",
+                "--no-path-resolution",
+            ]
+        )
         result = runner.run(argv, cwd=root)
         try:
             data = json.loads(result.stdout)
