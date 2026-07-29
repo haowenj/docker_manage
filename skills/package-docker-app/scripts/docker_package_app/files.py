@@ -8,12 +8,15 @@ from pathlib import Path
 
 from docker_package_app.compose import ComposeDocument
 from docker_package_app.errors import AnswerRequired, PackageError
-from docker_package_app.models import FileAction, FileCandidate
+from docker_package_app.models import FileAction, FileAssignment, FileCandidate
+
+FileIdentity = tuple[str, str, str, str]
+FileRewriteKey = tuple[str, str, str]
 
 
 @dataclass(frozen=True)
 class FileMaterialization:
-    rewrites: Mapping[str, str]
+    rewrites: Mapping[FileRewriteKey, str]
     server_paths: tuple[str, ...]
     copied_bytes: int
 
@@ -59,27 +62,29 @@ def discover_file_dependencies(
 
 def materialize_files(
     candidates: Sequence[FileCandidate],
-    decisions: Mapping[str, FileAction],
+    assignments: Sequence[FileAssignment],
     payload_root: Path,
 ) -> FileMaterialization:
+    assignment_by_identity = {
+        _assignment_identity(item): item
+        for item in assignments
+    }
     payload = payload_root.resolve()
     files_root = payload / "files"
-    files_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    rewrites: dict[str, str] = {}
+    rewrites: dict[FileRewriteKey, str] = {}
     server_paths: set[str] = set()
     copied_sources: set[str] = set()
     bind_destinations: set[Path] = set()
     copied_bytes = 0
 
     for candidate in sorted(candidates, key=lambda item: item.resolved_path):
-        action = decisions.get(candidate.resolved_path)
-        if action is None:
-            if candidate.inside_project:
-                action = FileAction.COPY
-            else:
-                raise AnswerRequired(
-                    f"外部路径需要明确处理决定：{candidate.resolved_path}"
-                )
+        assignment = assignment_by_identity.get(_candidate_identity(candidate))
+        if assignment is None:
+            raise AnswerRequired(
+                "文件依赖缺少已确认决定："
+                f"{candidate.service}/{candidate.kind}/{candidate.compose_value}"
+            )
+        action = assignment.action
         if action is FileAction.KEEP_SERVER_PATH:
             server_paths.add(candidate.resolved_path)
             continue
@@ -91,6 +96,7 @@ def materialize_files(
         source = Path(candidate.resolved_path)
         if not source.exists():
             raise PackageError(f"本地 Compose 依赖不存在：{source}")
+        files_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         destination = files_root / candidate.project_path
         if not destination.resolve(strict=False).is_relative_to(files_root):
             raise PackageError(f"制品载荷路径不安全：{candidate.project_path}")
@@ -100,7 +106,9 @@ def materialize_files(
             copied_bytes += candidate.estimated_size
         if candidate.kind == "bind":
             bind_destinations.add(destination)
-        rewrites[candidate.compose_value] = f"./files/{Path(candidate.project_path).as_posix()}"
+        rewrites[_rewrite_key(candidate)] = (
+            f"./files/{Path(candidate.project_path).as_posix()}"
+        )
 
     for destination in sorted(bind_destinations):
         _make_bind_writable(destination)
@@ -110,6 +118,28 @@ def materialize_files(
         server_paths=tuple(sorted(server_paths)),
         copied_bytes=copied_bytes,
     )
+
+
+def _candidate_identity(candidate: FileCandidate) -> FileIdentity:
+    return (
+        candidate.service,
+        candidate.kind,
+        candidate.compose_value,
+        candidate.resolved_path,
+    )
+
+
+def _assignment_identity(assignment: FileAssignment) -> FileIdentity:
+    return (
+        assignment.service,
+        assignment.kind,
+        assignment.original_value,
+        assignment.resolved_path,
+    )
+
+
+def _rewrite_key(candidate: FileCandidate) -> FileRewriteKey:
+    return candidate.service, candidate.kind, candidate.compose_value
 
 
 def _candidate(

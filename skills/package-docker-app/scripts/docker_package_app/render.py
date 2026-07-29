@@ -11,13 +11,14 @@ from dotenv import set_key
 from docker_package_app.command import CommandRunner
 from docker_package_app.compose import ComposeDocument
 from docker_package_app.errors import PackageError
+from docker_package_app.files import FileRewriteKey
 from docker_package_app.models import PackagePlan
 
 
 def render_deployment(
     base: ComposeDocument,
     plan: PackagePlan,
-    file_rewrites: Mapping[str, str],
+    file_rewrites: Mapping[FileRewriteKey, str],
 ) -> dict[str, Any]:
     data = copy.deepcopy(base.data)
     data["name"] = plan.compose_project_name
@@ -69,18 +70,28 @@ def render_deployment(
             else:
                 config.pop("ports", None)
 
-        _rewrite_service_volumes(config, file_rewrites)
+        _rewrite_service_volumes(service, config, file_rewrites)
 
-    for kind in ("configs", "secrets"):
-        definitions = data.get(kind)
+    for kind in ("config", "secret"):
+        definitions = data.get(f"{kind}s")
         if not isinstance(definitions, dict):
             continue
         for definition in definitions.values():
             if not isinstance(definition, dict):
                 continue
             source = definition.get("file")
-            if isinstance(source, str) and source in file_rewrites:
-                definition["file"] = file_rewrites[source]
+            if not isinstance(source, str):
+                continue
+            destinations = {
+                destination
+                for (_service, rewrite_kind, original), destination
+                in file_rewrites.items()
+                if rewrite_kind == kind and original == source
+            }
+            if len(destinations) > 1:
+                raise PackageError(f"{kind} 文件 {source} 存在不一致的载荷改写")
+            if destinations:
+                definition["file"] = destinations.pop()
 
     return data
 
@@ -144,8 +155,9 @@ def validate_deployment(
 
 
 def _rewrite_service_volumes(
+    service: str,
     config: dict[str, Any],
-    rewrites: Mapping[str, str],
+    rewrites: Mapping[FileRewriteKey, str],
 ) -> None:
     volumes = config.get("volumes")
     if not isinstance(volumes, list):
@@ -153,15 +165,14 @@ def _rewrite_service_volumes(
     for index, volume in enumerate(volumes):
         if isinstance(volume, dict):
             source = volume.get("source")
-            if (
-                volume.get("type") == "bind"
-                and isinstance(source, str)
-                and source in rewrites
-            ):
-                volume["source"] = rewrites[source]
+            if volume.get("type") == "bind" and isinstance(source, str):
+                rewrite = rewrites.get((service, "bind", source))
+                if rewrite is not None:
+                    volume["source"] = rewrite
             continue
         if not isinstance(volume, str):
             continue
         source, separator, remainder = volume.partition(":")
-        if separator and source in rewrites:
-            volumes[index] = f"{rewrites[source]}:{remainder}"
+        rewrite = rewrites.get((service, "bind", source))
+        if separator and rewrite is not None:
+            volumes[index] = f"{rewrite}:{remainder}"

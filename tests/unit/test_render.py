@@ -120,7 +120,10 @@ def test_rendered_compose_is_deploy_only(tmp_path: Path) -> None:
     rendered = render_deployment(
         base,
         _plan(tmp_path),
-        {"./config": "./files/config", "./app.ini": "./files/app.ini"},
+        {
+            ("web", "bind", "./config"): "./files/config",
+            ("web", "config", "./app.ini"): "./files/app.ini",
+        },
     )
 
     web = rendered["services"]["web"]
@@ -146,6 +149,23 @@ def test_rendered_compose_is_deploy_only(tmp_path: Path) -> None:
     assert web["restart"] == "unless-stopped"
     assert web["healthcheck"] == {"test": ["CMD", "true"]}
     assert base.service("web")["build"] == "."
+
+
+def test_render_keeps_bind_when_same_source_is_only_copied_as_config(
+    tmp_path: Path,
+) -> None:
+    base = _base(tmp_path)
+    base.data["services"]["web"]["volumes"][0]["source"] = "./app.ini"
+
+    rendered = render_deployment(
+        base,
+        _plan(tmp_path),
+        {("web", "config", "./app.ini"): "./files/app.ini"},
+    )
+
+    web = rendered["services"]["web"]
+    assert web["volumes"][0]["source"] == "./app.ini"
+    assert rendered["configs"]["app-config"]["file"] == "./files/app.ini"
 
 
 def test_write_and_validate_deployment(tmp_path: Path) -> None:

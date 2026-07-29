@@ -9,7 +9,24 @@ from docker_package_app.files import (
     discover_file_dependencies,
     materialize_files,
 )
-from docker_package_app.models import FileAction
+from docker_package_app.models import FileAction, FileAssignment, FileCandidate
+
+
+def _assignment(
+    candidate: FileCandidate,
+    action: FileAction,
+) -> FileAssignment:
+    payload_path = None
+    if action is FileAction.COPY and candidate.project_path is not None:
+        payload_path = f"files/{candidate.project_path}"
+    return FileAssignment(
+        service=candidate.service,
+        original_value=candidate.compose_value,
+        resolved_path=candidate.resolved_path,
+        kind=candidate.kind,
+        action=action,
+        payload_path=payload_path,
+    )
 
 
 def _compose(root: Path, source: str) -> ComposeDocument:
@@ -42,14 +59,14 @@ def test_project_relative_bind_is_copied_without_tool_state(tmp_path: Path) -> N
 
     result = materialize_files(
         candidates,
-        {item.resolved_path: FileAction.COPY for item in candidates},
+        tuple(_assignment(item, FileAction.COPY) for item in candidates),
         tmp_path / "payload",
     )
 
     assert bind.inside_project is True
     assert (tmp_path / "payload/files/config/app.ini").exists()
     assert not (tmp_path / "payload/files/config/.docker-manage").exists()
-    assert result.rewrites["./config"] == "./files/config"
+    assert result.rewrites[("web", "bind", "./config")] == "./files/config"
 
 
 def test_symlink_outside_project_requires_server_path_decision(tmp_path: Path) -> None:
@@ -66,7 +83,15 @@ def test_symlink_outside_project_requires_server_path_decision(tmp_path: Path) -
 
     result = materialize_files(
         candidates,
-        {bind.resolved_path: FileAction.KEEP_SERVER_PATH},
+        tuple(
+            _assignment(
+                item,
+                FileAction.KEEP_SERVER_PATH
+                if item.kind == "bind"
+                else FileAction.COPY,
+            )
+            for item in candidates
+        ),
         tmp_path / "payload",
     )
     assert result.server_paths == (str(outside.resolve()),)
@@ -91,7 +116,7 @@ def test_copied_bind_is_world_readable_and_writable_recursively(
 
     materialize_files(
         (candidate,),
-        {candidate.resolved_path: FileAction.COPY},
+        (_assignment(candidate, FileAction.COPY),),
         tmp_path / "payload",
     )
 
@@ -132,13 +157,83 @@ def test_copied_config_permissions_are_preserved(tmp_path: Path) -> None:
 
     materialize_files(
         candidates,
-        {item.resolved_path: FileAction.COPY for item in candidates},
+        tuple(_assignment(item, FileAction.COPY) for item in candidates),
         tmp_path / "payload",
     )
 
     assert stat.S_IMODE(
         (tmp_path / "payload/files/app.ini").stat().st_mode
     ) == 0o600
+
+
+def test_kept_project_bind_is_not_materialized_or_rewritten(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "data"
+    source.mkdir()
+    (source / "local.db").write_text("developer-data", encoding="utf-8")
+    (tmp_path / "app.ini").write_text("", encoding="utf-8")
+    candidate = next(
+        item
+        for item in discover_file_dependencies(
+            _compose(tmp_path, "./data"),
+            tmp_path,
+        )
+        if item.kind == "bind"
+    )
+
+    result = materialize_files(
+        (candidate,),
+        (_assignment(candidate, FileAction.KEEP_SERVER_PATH),),
+        tmp_path / "payload",
+    )
+
+    assert not (tmp_path / "payload/files/data").exists()
+    assert result.rewrites == {}
+    assert result.server_paths == (str(source.resolve()),)
+    assert result.copied_bytes == 0
+
+
+def test_same_source_bind_can_be_kept_while_config_is_copied(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "shared.ini"
+    source.write_text("mode=server\n", encoding="utf-8")
+    compose = ComposeDocument.from_data(
+        tmp_path,
+        {
+            "services": {
+                "web": {
+                    "image": "demo:1",
+                    "volumes": [
+                        {
+                            "type": "bind",
+                            "source": "./shared.ini",
+                            "target": "/app/shared.ini",
+                        }
+                    ],
+                    "configs": [{"source": "shared"}],
+                }
+            },
+            "configs": {"shared": {"file": "./shared.ini"}},
+        },
+    )
+    candidates = discover_file_dependencies(compose, tmp_path)
+    assignments = tuple(
+        _assignment(
+            item,
+            FileAction.KEEP_SERVER_PATH
+            if item.kind == "bind"
+            else FileAction.COPY,
+        )
+        for item in candidates
+    )
+
+    result = materialize_files(candidates, assignments, tmp_path / "payload")
+
+    assert (tmp_path / "payload/files/shared.ini").is_file()
+    assert ("web", "bind", "./shared.ini") not in result.rewrites
+    assert result.rewrites[("web", "config", "./shared.ini")] == "./files/shared.ini"
 
 
 def test_named_volume_is_not_a_file_dependency(tmp_path: Path) -> None:
