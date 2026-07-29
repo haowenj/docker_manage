@@ -8,7 +8,8 @@
 不再无条件复制进离线部署归档。每个 bind source 都必须在计划阶段明确选择：
 
 - `copy`：复制本机内容到归档，并把部署 Compose 改写到归档内路径。
-- `keep_server_path`：不复制本机内容，部署 Compose 保留原挂载路径。
+- `keep_server_path`：不复制本机内容；项目内 bind 的部署 Compose 仍指向
+  第一次 `copy` 使用的稳定 `./files/...` 地址，项目外 bind 保留原挂载路径。
 - `abort`：中止本次打包。
 
 这让配置目录仍可随包发布，同时允许数据库文件、上传文件和其他持久数据继续
@@ -103,11 +104,17 @@ Docker named volume 目前不会作为文件依赖复制，不受这个问题影
 ### `keep_server_path`
 
 - source 的目录条目和内容都不进入载荷或最终归档。
-- Compose source 保持原始值，不做路径改写。
-- 相对路径如 `./data` 仍相对于服务器上 `compose.yaml` 所在目录解析。
-- 绝对路径继续引用服务器上的相同绝对路径。
-- manifest 的 `server_paths` 记录解析后的服务器依赖路径。
+- 项目内 bind 的 Compose source 仍改写为和 `copy` 相同的
+  `./files/<项目相对路径>`，保证多次打包的部署地址稳定。
+- 项目外 bind 的 Compose source 保持原始值，不做路径改写。
+- manifest 的 `server_paths` 记录实际部署 source；项目内 bind 记录
+  `./files/...`，不得记录开发电脑的绝对路径。
 - CLI 不创建、不清空、不修改该服务器目录，也不改变其权限。
+
+`copy` 和 `keep_server_path` 的区别只控制本次归档是否携带目录内容，不改变
+项目内 bind 的部署地址。第一次选择 `copy` 后，服务器得到
+`files/<项目相对路径>`；后续选择 `keep_server_path` 时，新归档不包含该目录，
+但新 Compose 继续挂载同一位置。
 
 例如：
 
@@ -121,8 +128,16 @@ services:
 
 若 `data` 选择 `keep_server_path`、`config` 选择 `copy`，归档包含
 `files/config/`，但完全不包含 `data/` 或 `files/data/`。部署 Compose
-保持 `./data:/app/data`，并把配置挂载改写为
-`./files/config:/app/config:ro`。
+使用 `./files/data:/app/data`，并把配置挂载改写为
+`./files/config:/app/config:ro`。服务器上第一次部署留下的
+`files/data/` 会继续被使用。
+
+## Compose 路径解析
+
+检查 Compose 时使用 `docker compose config --no-path-resolution`，阻止
+Docker Compose 把 `./data`、构建上下文等相对路径提前转换为开发电脑的绝对
+路径。CLI 仍在内部相对于项目根目录解析路径，用于判断项目内外、读取文件和
+计算项目相对路径；解析后的本机路径不得直接写入部署 Compose。
 
 ## 重复解压语义
 
@@ -161,8 +176,9 @@ services:
 - 相同 bind source 的多个引用共享一个问题。
 - `copy` 计划包含载荷路径，`keep_server_path` 计划不包含载荷路径。
 - `abort` 在计划阶段失败。
-- 被保留的 bind 不被复制，也不出现在 rewrite 映射中。
-- 被保留的相对 source 在渲染后的 Compose 中保持原值。
+- 被保留的 bind 不被复制；项目内 bind 仍产生稳定部署地址 rewrite。
+- 被保留的项目内 bind 在渲染后的 Compose 中使用稳定的 `./files/...`。
+- Compose 检查命令包含 `--no-path-resolution`。
 - 同一路径同时用于 bind 和 config 时，bind 可以保留而 config 仍被复制。
 - named volume 不生成问题。
 
@@ -170,8 +186,8 @@ services:
 
 - 对 `./data` 选择 `keep_server_path` 后成功生成归档。
 - 归档不包含 `data/` 或 `files/data/` 的任何成员。
-- 归档 Compose 仍包含 `./data` source。
-- manifest 把该路径列为服务器依赖。
+- 归档 Compose 包含 `./files/data` source。
+- manifest 把 `./files/data` 列为服务器依赖，不包含开发电脑绝对路径。
 - 在预先包含服务器数据的部署目录上覆盖解压，原数据内容保持不变。
 - 同一应用中的 `copy` bind 仍随包发布并覆盖其对应文件。
 - 计划输出和 `plan_hash` 随 bind 选择变化。
@@ -182,7 +198,8 @@ services:
 
 - 逐项展示 bind mount 的处理问题。
 - 完整计划明确区分复制内容和保留服务器路径。
-- `keep_server_path` 的本机内容不得进入归档。
+- `keep_server_path` 的本机内容不得进入归档，但项目内 bind 的 Compose
+  source 必须和 `copy` 一样稳定指向 `./files/...`。
 - 服务器路径在重复原地解压时不会被归档成员覆盖。
 - 未获得计划哈希确认前不得开始 Docker 变更。
 
@@ -199,7 +216,10 @@ services:
 
 - 每个 bind source 都有明确、可审查的复制或保留决定。
 - 选择 `keep_server_path` 后，本机 source 及其内容完全不进入归档。
-- 部署 Compose 保留该 source 的原始相对或绝对路径。
+- 项目内 bind 的部署 Compose 稳定使用 `./files/...`，项目外 bind 保留原始
+  source。
+- 部署 Compose、manifest 和打包结果不得包含由 Compose 路径解析产生的开发
+  电脑绝对路径。
 - 手动在同一服务器目录重复覆盖解压时，保留路径中的现有数据不被归档覆盖。
 - 选择 `copy` 的配置类 bind 继续按现有方式随包发布。
 - config、secret、named volume 及其他现有流程保持兼容。
