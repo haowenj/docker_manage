@@ -65,6 +65,7 @@ def _plan(root: Path) -> PackagePlan:
                 service="web",
                 original_value="/srv/shared",
                 resolved_path="/srv/shared",
+                kind="bind",
                 action=FileAction.KEEP_SERVER_PATH,
             ),
         ),

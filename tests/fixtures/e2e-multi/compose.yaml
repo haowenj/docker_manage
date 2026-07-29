@@ -11,6 +11,9 @@ services:
         source: ./config
         target: /app/config
         read_only: true
+      - type: bind
+        source: ./data
+        target: /app/data
   worker:
     build:
       context: ./worker

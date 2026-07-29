@@ -7,6 +7,7 @@ import pytest
 from conftest import CliRunner
 from docker_package_app.cli import _resolve_answers, _translate_argparse_error
 from docker_package_app.models import Question
+from docker_package_app.questions import _file_question_id
 
 
 def test_inspect_missing_docker_files_requests_model(
@@ -423,3 +424,92 @@ def test_cli_help_and_argument_errors_use_chinese(
 
 def test_unknown_argparse_error_does_not_expose_english_fallback() -> None:
     assert _translate_argparse_error("unexpected parser failure") == "参数内容不符合要求"
+
+
+def test_bind_decision_is_required_and_changes_plan_hash(
+    cli: CliRunner,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "bind-plan"
+    project.mkdir()
+    data = project / "data"
+    data.mkdir()
+    (data / "local.db").write_text("local", encoding="utf-8")
+    (project / "compose.yaml").write_text(
+        """services:
+  app:
+    image: busybox:1.36
+    volumes:
+      - ./data:/data
+""",
+        encoding="utf-8",
+    )
+
+    hashes: dict[str, str] = {}
+    plans: dict[str, dict[str, object]] = {}
+    question_id = _file_question_id(str(data.resolve()))
+    for decision in ("copy", "keep_server_path"):
+        inspected = cli("inspect", str(project), "--json")
+        assert inspected.returncode == 0, inspected.stderr
+        inspection = json.loads(inspected.stdout)
+        question = next(
+            item
+            for item in inspection["questions"]
+            if item["id"] == question_id
+        )
+        assert question["default"] == "copy"
+
+        missing_answers = project / f"missing-{decision}.json"
+        missing_answers.write_text(
+            json.dumps(
+                {"values": {"image.app.decision": "registry.intra/app:1"}}
+            ),
+            encoding="utf-8",
+        )
+        missing_answers.chmod(0o600)
+        missing = cli(
+            "plan",
+            str(project),
+            "--run-id",
+            inspection["run_id"],
+            "--answers",
+            str(missing_answers),
+            "--non-interactive",
+            "--json",
+        )
+        assert missing.returncode == 10
+        assert question_id in missing.stderr
+
+        answers = project / f"answers-{decision}.json"
+        answers.write_text(
+            json.dumps(
+                {
+                    "values": {
+                        "image.app.decision": "registry.intra/app:1",
+                        question_id: decision,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        answers.chmod(0o600)
+        planned = cli(
+            "plan",
+            str(project),
+            "--run-id",
+            inspection["run_id"],
+            "--answers",
+            str(answers),
+            "--non-interactive",
+            "--json",
+        )
+        assert planned.returncode == 0, planned.stderr
+        body = json.loads(planned.stdout)
+        hashes[decision] = body["plan_hash"]
+        plans[decision] = body["plan"]["files"][0]
+
+    assert hashes["copy"] != hashes["keep_server_path"]
+    assert plans["copy"]["action"] == "copy"
+    assert plans["copy"]["payload_path"] == "files/data"
+    assert plans["keep_server_path"]["action"] == "keep_server_path"
+    assert plans["keep_server_path"]["payload_path"] is None

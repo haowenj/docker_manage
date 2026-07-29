@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import CliRunner
+from docker_package_app.questions import _file_question_id
 
 
 def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> None:
@@ -27,6 +28,10 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
                     "port.worker.9000/tcp.expose": "no",
                     "image.redis.decision": "registry.intra/redis:7-approved",
                     "image.helper.decision": "打包",
+                    _file_question_id(str((project / "config").resolve())): "copy",
+                    _file_question_id(str((project / "data").resolve())): (
+                        "keep_server_path"
+                    ),
                 }
             }
         ),
@@ -64,6 +69,7 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         "docker-manage/demo/worker:v1",
     ]
     assert output["reused_images"] == ["registry.intra/redis:7-approved"]
+    assert output["server_paths"] == [str((project / "data").resolve())]
     with tarfile.open(archive_path, "r:gz") as bundle:
         compose = yaml.safe_load(bundle.extractfile("compose.yaml"))
         assert all(
@@ -72,12 +78,47 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
         )
         assert compose["services"]["web"]["ports"][0]["published"] == 18080
         assert "ports" not in compose["services"]["worker"]
-        assert compose["services"]["web"]["volumes"][0]["source"] == "./files/config"
+        names = set(bundle.getnames())
+        assert not any(
+            name == "data"
+            or name.startswith("data/")
+            or name == "files/data"
+            or name.startswith("files/data/")
+            for name in names
+        )
+        volumes = compose["services"]["web"]["volumes"]
+        assert volumes[0]["source"] == "./files/config"
+        assert volumes[1]["source"] == "./data"
         assert bundle.getmember("files/config/app.ini").size > 0
         assert bundle.getmember("files/config").mode == 0o777
         assert bundle.getmember("files/config/app.ini").mode == 0o666
         assert bundle.getmember("manifest.json").size > 0
         assert bundle.getmember("checksums.sha256").size > 0
+        manifest = json.load(bundle.extractfile("manifest.json"))
+        assert manifest["server_paths"] == [str((project / "data").resolve())]
+
+    deployment = tmp_path / "server-deployment"
+    (deployment / "data").mkdir(parents=True)
+    (deployment / "data/server.db").write_text(
+        "existing-test-data",
+        encoding="utf-8",
+    )
+    (deployment / "files/config").mkdir(parents=True)
+    (deployment / "files/config/app.ini").write_text(
+        "old-config",
+        encoding="utf-8",
+    )
+
+    with tarfile.open(archive_path, "r:gz") as bundle:
+        bundle.extractall(deployment)
+
+    assert (
+        deployment / "data/server.db"
+    ).read_text(encoding="utf-8") == "existing-test-data"
+    assert not (deployment / "data/local.db").exists()
+    assert (
+        deployment / "files/config/app.ini"
+    ).read_text(encoding="utf-8") != "old-config"
 
 
 def test_successful_package_becomes_next_inspection_current_config(

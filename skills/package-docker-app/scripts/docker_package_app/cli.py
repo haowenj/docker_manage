@@ -431,8 +431,11 @@ def _perform_package(args: argparse.Namespace, paths: WorkPaths) -> dict[str, An
     payload = paths.run / "payload"
     payload.mkdir(mode=0o700, parents=True, exist_ok=False)
 
-    decisions = {item.resolved_path: item.action for item in plan.files}
-    materialized = materialize_files(state.inspection.files, decisions, payload)
+    materialized = materialize_files(
+        state.inspection.files,
+        plan.files,
+        payload,
+    )
     rendered = render_deployment(compose, plan, materialized.rewrites)
     env_values = {item.artifact_name: item.value for item in plan.environment}
     compose_path, env_path = write_deployment(rendered, env_values, payload)
