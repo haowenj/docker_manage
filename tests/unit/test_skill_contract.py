@@ -88,6 +88,7 @@ def test_skill_requires_explicit_bind_copy_or_server_preservation(
         "`copy`",
         "`keep_server_path`",
         "`abort`",
+        "项目内 bind 默认值为 `keep_server_path`",
         "不进入归档",
         "稳定部署路径",
         "`./files/`",
