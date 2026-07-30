@@ -457,7 +457,7 @@ def test_bind_decision_is_required_and_changes_plan_hash(
             for item in inspection["questions"]
             if item["id"] == question_id
         )
-        assert question["default"] == "copy"
+        assert question["default"] == "keep_server_path"
 
         missing_answers = project / f"missing-{decision}.json"
         missing_answers.write_text(

@@ -139,7 +139,7 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
         location = "项目目录内" if inside_project else "项目目录外"
         if inside_project:
             choices = ("copy", "keep_server_path", "abort")
-            default = "copy"
+            default = "keep_server_path"
             meaning = (
                 "copy（复制本机内容）、keep_server_path（保留服务器现有路径）"
                 "或 abort（中止）"

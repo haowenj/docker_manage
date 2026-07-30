@@ -60,7 +60,7 @@ def test_project_bind_question_offers_copy_keep_and_abort() -> None:
 
     assert question.id == _file_question_id("/project/data")
     assert question.kind == "file"
-    assert question.default == "copy"
+    assert question.default == "keep_server_path"
     assert question.choices == ("copy", "keep_server_path", "abort")
     assert "web" in question.prompt
     assert "./data" in question.prompt
