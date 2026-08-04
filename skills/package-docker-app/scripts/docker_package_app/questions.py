@@ -115,8 +115,10 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
                 id=f"image.{image.service}.decision",
                 kind="image",
                 prompt=(
-                    f"请在 Docker Manage 中检查镜像 {image.image}。粘贴可复用的镜像引用，"
+                    f"【重要】检测到第三方镜像：服务 {image.service} 使用 {image.image}。"
+                    "请确认处理方式：在 Docker Manage 中检查并粘贴可复用的镜像引用，"
                     "或输入“打包”以拉取并包含原始镜像。"
+                    "【注意】输入“打包”会将该镜像写入离线部署包。"
                 ),
                 default="打包",
             )

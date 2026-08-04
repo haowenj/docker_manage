@@ -7,6 +7,7 @@ from docker_package_app.models import (
     DefaultValue,
     EnvCandidate,
     FileCandidate,
+    ImageCandidate,
     Inspection,
     PortCandidate,
     Question,
@@ -140,6 +141,27 @@ def test_project_config_and_secret_do_not_generate_file_questions() -> None:
     )
 
     assert build_questions(inspection) == ()
+
+
+def test_third_party_image_question_is_visibly_emphasized() -> None:
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        images=(ImageCandidate(service="db", image="postgres:16"),),
+    )
+
+    question = build_questions(inspection)[0]
+
+    assert question.id == "image.db.decision"
+    assert "【重要】" in question.prompt
+    assert "第三方镜像" in question.prompt
+    assert "服务 db" in question.prompt
+    assert "postgres:16" in question.prompt
+    assert "复用" in question.prompt
+    assert "输入“打包”" in question.prompt
+    assert "【注意】" in question.prompt
+    assert question.default == "打包"
 
 
 def test_default_and_explicit_empty_rules() -> None:
