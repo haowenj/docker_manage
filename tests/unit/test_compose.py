@@ -12,10 +12,12 @@ class ComposeRunner:
     def __init__(self, document: dict) -> None:
         self.document = document
         self.calls: list[list[str]] = []
+        self.kwargs: list[dict] = []
 
     def run(self, argv, **kwargs):
         call = list(argv)
         self.calls.append(call)
+        self.kwargs.append(kwargs)
         return CommandResult(call, 0, json.dumps(self.document), "")
 
 
@@ -75,6 +77,26 @@ def test_compose_dump_is_structurally_readable(tmp_path: Path) -> None:
     document.dump(output)
 
     assert yaml.safe_load(output.read_text(encoding="utf-8")) == document.data
+
+
+def test_compose_can_interpolate_with_explicit_environment(tmp_path: Path) -> None:
+    runner = ComposeRunner({"services": {"app": {"image": "demo:1"}}})
+    environment = {
+        "DOCKER_MANAGE_DATA_DIR": "/data/docker-manage-server",
+        "PWD": str(tmp_path),
+    }
+
+    ComposeDocument.load(
+        tmp_path,
+        [tmp_path / "compose.yaml"],
+        [],
+        runner,
+        environment=environment,
+        interpolate=True,
+    )
+
+    assert "--no-interpolate" not in runner.calls[0]
+    assert runner.kwargs[0]["env"] == environment
 
 
 def test_compose_rejects_non_mapping_services(tmp_path: Path) -> None:

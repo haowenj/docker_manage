@@ -35,6 +35,9 @@ class ComposeDocument:
         files: Sequence[Path],
         profiles: Sequence[str],
         runner: CommandRunner,
+        *,
+        environment: Mapping[str, str] | None = None,
+        interpolate: bool = False,
     ) -> ComposeDocument:
         root = project_root.resolve()
         argv = ["docker", "compose", "--project-directory", str(root)]
@@ -43,16 +46,11 @@ class ComposeDocument:
             argv.extend(["-f", str(path)])
         for profile in profiles:
             argv.extend(["--profile", profile])
-        argv.extend(
-            [
-                "config",
-                "--format",
-                "json",
-                "--no-interpolate",
-                "--no-path-resolution",
-            ]
-        )
-        result = runner.run(argv, cwd=root)
+        argv.extend(["config", "--format", "json"])
+        if not interpolate:
+            argv.append("--no-interpolate")
+        argv.append("--no-path-resolution")
+        result = runner.run(argv, cwd=root, env=environment)
         try:
             data = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
