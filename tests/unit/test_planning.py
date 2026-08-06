@@ -15,7 +15,7 @@ from docker_package_app.models import (
     SourceRef,
     Stage,
 )
-from docker_package_app.planning import build_plan
+from docker_package_app.planning import build_plan, compose_file_environment
 from docker_package_app.questions import _file_question_id
 
 
@@ -227,3 +227,50 @@ def test_bind_keep_does_not_override_same_path_config_copy(
         ("config", FileAction.COPY),
     }
     assert plan.disk.known_input_bytes == 12
+
+
+def test_resolved_external_bind_path_overrides_inspection_location(
+    tmp_path: Path,
+) -> None:
+    inspection = _inspection(tmp_path)
+    original = inspection.files[0]
+    resolved = original.model_copy(
+        update={
+            "compose_value": original.compose_value,
+            "resolved_path": "/data/docker-manage-server",
+            "inside_project": False,
+            "project_path": None,
+            "estimated_size": 0,
+        }
+    )
+
+    plan = build_plan(
+        inspection,
+        _answers(tmp_path, file_decision="keep_server_path"),
+        app_name="demo",
+        version="v1",
+        platform="linux/amd64",
+        resolved_files=(resolved,),
+    )
+
+    assignment = plan.files[0]
+    assert assignment.original_value == "./config"
+    assert assignment.resolved_path == "/data/docker-manage-server"
+    assert assignment.action is FileAction.KEEP_SERVER_PATH
+    assert assignment.payload_path is None
+
+
+def test_compose_file_environment_rejects_conflicting_referenced_values(
+    tmp_path: Path,
+) -> None:
+    inspection = _inspection(tmp_path)
+    variable_file = inspection.files[0].model_copy(
+        update={"compose_value": "${PORT}/config"}
+    )
+    inspection = inspection.model_copy(update={"files": (variable_file,)})
+
+    with pytest.raises(
+        PlanValidationError,
+        match="Compose 插值变量 PORT.*最终值不一致",
+    ):
+        compose_file_environment(inspection, _answers(tmp_path))

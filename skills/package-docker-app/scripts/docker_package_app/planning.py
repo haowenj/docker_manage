@@ -14,6 +14,7 @@ from docker_package_app.models import (
     EnvAssignment,
     FileAction,
     FileAssignment,
+    FileCandidate,
     ImageAction,
     ImageAssignment,
     Inspection,
@@ -31,6 +32,32 @@ IMAGE_PATTERN = re.compile(
     r"(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?"
     r"(?:@sha256:[a-f0-9]{64})?$"
 )
+COMPOSE_VARIABLE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def compose_file_environment(
+    inspection: Inspection,
+    answers: AnswerBook,
+) -> dict[str, str]:
+    referenced = {
+        match.group(1)
+        for item in inspection.files
+        for match in COMPOSE_VARIABLE_PATTERN.finditer(item.compose_value)
+    }
+    environment = {"PWD": inspection.project_root}
+    for name in sorted(referenced - {"PWD"}):
+        values = {
+            answers.values[f"env.{item.service}.{item.name}"]
+            for item in inspection.env
+            if item.name == name
+        }
+        if len(values) > 1:
+            raise PlanValidationError(
+                f"Compose 插值变量 {name} 在多个服务中的最终值不一致"
+            )
+        if values:
+            environment[name] = values.pop()
+    return environment
 
 
 def build_plan(
@@ -40,6 +67,7 @@ def build_plan(
     app_name: str,
     version: str,
     platform: str,
+    resolved_files: Sequence[FileCandidate] | None = None,
 ) -> PackagePlan:
     _validate_identity(app_name, version, platform)
     questions = {item.id: item for item in build_questions(inspection)}
@@ -51,6 +79,9 @@ def build_plan(
         if question_id not in answers.values:
             raise AnswerRequired(f"缺少答案：{question_id}")
 
+    effective_files = tuple(
+        inspection.files if resolved_files is None else resolved_files
+    )
     environment = _build_environment(inspection, answers)
     build_args = tuple(
         BuildArgAssignment(
@@ -62,8 +93,8 @@ def build_plan(
     )
     ports = _build_ports(inspection, answers)
     images = _build_images(inspection, answers, app_name, version, platform)
-    files = _build_files(inspection, answers)
-    copied_input_bytes = _copied_input_bytes(inspection, files)
+    files = _build_files(inspection, answers, effective_files)
+    copied_input_bytes = _copied_input_bytes(effective_files, files)
     unknown = tuple(
         sorted(
             item.final_image
@@ -197,44 +228,50 @@ def _build_images(
     return tuple(assignments)
 
 
+def _file_identity(item: FileCandidate) -> tuple[str, str, str]:
+    return item.service, item.kind, item.compose_value
+
+
 def _build_files(
     inspection: Inspection,
     answers: AnswerBook,
+    resolved_files: Sequence[FileCandidate],
 ) -> tuple[FileAssignment, ...]:
     root = Path(inspection.project_root).resolve()
+    effective = {_file_identity(item): item for item in resolved_files}
+    originals = {_file_identity(item): item for item in inspection.files}
+    if effective.keys() != originals.keys():
+        raise PlanValidationError("Compose 插值前后的文件依赖无法一一对应")
+
     assignments: list[FileAssignment] = []
-    for item in sorted(
-        inspection.files,
-        key=lambda value: (
-            value.resolved_path,
-            value.service,
-            value.kind,
-            value.compose_value,
-        ),
-    ):
+    for identity in sorted(originals):
+        original = originals[identity]
+        item = effective[identity]
         path = Path(item.resolved_path).resolve()
-        if item.kind == "bind" or not item.inside_project:
-            decision = answers.values[_file_question_id(str(path))]
+        if original.kind == "bind" or not original.inside_project:
+            decision = answers.values[
+                _file_question_id(str(Path(original.resolved_path).resolve()))
+            ]
             if decision == "abort":
                 raise PlanValidationError(f"已因路径 {path} 中止打包")
             action = FileAction(decision)
         else:
             action = FileAction.COPY
 
-        if action is FileAction.COPY and not item.inside_project:
+        if action is FileAction.COPY and not path.is_relative_to(root):
             raise PlanValidationError(f"无法复制项目目录之外的路径：{path}")
 
         payload_path = None
         if action is FileAction.COPY:
             relative = path.relative_to(root)
-            payload = Path("files") / (relative if relative.parts else Path("project"))
-            payload_path = payload.as_posix()
+            project_path = relative if relative.parts else Path("project")
+            payload_path = (Path("files") / project_path).as_posix()
         assignments.append(
             FileAssignment(
-                service=item.service,
-                original_value=item.compose_value,
+                service=original.service,
+                original_value=original.compose_value,
                 resolved_path=str(path),
-                kind=item.kind,
+                kind=original.kind,
                 action=action,
                 payload_path=payload_path,
             )
@@ -243,7 +280,7 @@ def _build_files(
 
 
 def _copied_input_bytes(
-    inspection: Inspection,
+    files: Sequence[FileCandidate],
     assignments: Sequence[FileAssignment],
 ) -> int:
     copied_paths = {
@@ -252,7 +289,7 @@ def _copied_input_bytes(
         if item.action is FileAction.COPY
     }
     size_by_path: dict[str, int] = {}
-    for item in inspection.files:
+    for item in files:
         if item.resolved_path in copied_paths:
             size_by_path[item.resolved_path] = max(
                 size_by_path.get(item.resolved_path, 0),

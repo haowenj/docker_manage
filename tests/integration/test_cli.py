@@ -513,3 +513,78 @@ def test_bind_decision_is_required_and_changes_plan_hash(
     assert plans["copy"]["payload_path"] == "files/data"
     assert plans["keep_server_path"]["action"] == "keep_server_path"
     assert plans["keep_server_path"]["payload_path"] is None
+
+
+def test_plan_resolves_interpolated_bind_from_final_environment(
+    cli: CliRunner,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "interpolated-bind"
+    project.mkdir()
+    (project / "compose.yaml").write_text(
+        """services:
+  app:
+    image: busybox:1.36
+    environment:
+      DATA_DIR: ${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}
+    volumes:
+      - type: bind
+        source: ${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}
+        target: ${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}
+""",
+        encoding="utf-8",
+    )
+    inspected = cli("inspect", str(project), "--json")
+    assert inspected.returncode == 0, inspected.stderr
+    body = json.loads(inspected.stdout)
+    file_question = next(
+        item for item in body["questions"] if item["kind"] == "file"
+    )
+    answers = project / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "env.app.DATA_DIR": "/data/docker-manage-server",
+                    "env.app.DOCKER_MANAGE_DATA_DIR": "/data/docker-manage-server",
+                    "image.app.decision": "registry.intra/busybox:1.36",
+                    file_question["id"]: "keep_server_path",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    answers.chmod(0o600)
+    resolved = {
+        "services": {
+            "app": {
+                "image": "busybox:1.36",
+                "environment": {"DATA_DIR": "/data/docker-manage-server"},
+                "volumes": [
+                    {
+                        "type": "bind",
+                        "source": "/data/docker-manage-server",
+                        "target": "/data/docker-manage-server",
+                    }
+                ],
+            }
+        }
+    }
+
+    planned = cli(
+        "plan",
+        str(project),
+        "--run-id",
+        body["run_id"],
+        "--answers",
+        str(answers),
+        "--non-interactive",
+        "--json",
+        env={"FAKE_DOCKER_RESOLVED_COMPOSE_CONFIG": json.dumps(resolved)},
+    )
+
+    assert planned.returncode == 0, planned.stderr
+    file_plan = json.loads(planned.stdout)["plan"]["files"][0]
+    assert file_plan["resolved_path"] == "/data/docker-manage-server"
+    assert file_plan["action"] == "keep_server_path"
+    assert file_plan["payload_path"] is None

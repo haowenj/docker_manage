@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from docker_package_app.compose import ComposeDocument
-from docker_package_app.errors import AnswerRequired
+from docker_package_app.errors import AnswerRequired, PackageError
 from docker_package_app.files import (
     _make_bind_writable,
     discover_file_dependencies,
@@ -262,3 +262,68 @@ def test_named_volume_is_not_a_file_dependency(tmp_path: Path) -> None:
     )
 
     assert discover_file_dependencies(compose, tmp_path) == ()
+
+
+def test_resolved_compose_value_controls_bind_location(tmp_path: Path) -> None:
+    raw_source = "${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}"
+    raw = _compose(tmp_path, raw_source)
+    resolved = _compose(tmp_path, "/data/docker-manage-server")
+
+    candidate = next(
+        item
+        for item in discover_file_dependencies(
+            raw,
+            tmp_path,
+            resolved_compose=resolved,
+        )
+        if item.kind == "bind"
+    )
+
+    assert candidate.compose_value == raw_source
+    assert candidate.resolved_path == "/data/docker-manage-server"
+    assert candidate.inside_project is False
+
+
+def test_materialize_uses_assignment_resolved_external_path(tmp_path: Path) -> None:
+    raw_source = "${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}"
+    candidate = next(
+        item
+        for item in discover_file_dependencies(
+            _compose(tmp_path, raw_source),
+            tmp_path,
+        )
+        if item.kind == "bind"
+    )
+    assignment = FileAssignment(
+        service=candidate.service,
+        original_value=raw_source,
+        resolved_path="/data/docker-manage-server",
+        kind="bind",
+        action=FileAction.KEEP_SERVER_PATH,
+    )
+
+    result = materialize_files(
+        (candidate,),
+        (assignment,),
+        tmp_path / "payload",
+        tmp_path,
+    )
+
+    assert result.rewrites == {}
+    assert result.server_paths == ("/data/docker-manage-server",)
+    assert not (tmp_path / "payload/files").exists()
+
+
+def test_resolved_compose_requires_matching_volume_entries(tmp_path: Path) -> None:
+    raw = _compose(tmp_path, "${DATA_DIR:-${PWD}/data}")
+    resolved = ComposeDocument.from_data(
+        tmp_path,
+        {"services": {"web": {"image": "demo:1", "volumes": []}}},
+    )
+
+    with pytest.raises(PackageError, match="volume 无法一一对应"):
+        discover_file_dependencies(
+            raw,
+            tmp_path,
+            resolved_compose=resolved,
+        )

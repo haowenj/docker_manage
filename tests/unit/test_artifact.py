@@ -138,6 +138,40 @@ def test_manifest_records_project_bind_deployment_source(tmp_path: Path) -> None
     assert manifest.server_paths == ("./files/data",)
 
 
+def test_manifest_records_resolved_path_for_interpolated_external_bind(
+    tmp_path: Path,
+) -> None:
+    payload_root = tmp_path / "payload"
+    payload_root.mkdir()
+    (payload_root / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    plan = _plan(tmp_path).model_copy(
+        update={
+            "files": (
+                FileAssignment(
+                    service="web",
+                    original_value="${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}",
+                    resolved_path="/data/docker-manage-server",
+                    kind="bind",
+                    action=FileAction.KEEP_SERVER_PATH,
+                ),
+            )
+        }
+    )
+    metadata = ImageMetadata(
+        reference="docker-manage/demo/web:v1",
+        image_id="sha256:abc",
+        repo_digests=(),
+        os="linux",
+        architecture="amd64",
+        variant=None,
+        size=123,
+    )
+
+    manifest = build_manifest(plan, [metadata], payload_root)
+
+    assert manifest.server_paths == ("/data/docker-manage-server",)
+
+
 def test_archive_contains_verified_payload_and_is_reproducible(
     payload: Path,
     tmp_path: Path,

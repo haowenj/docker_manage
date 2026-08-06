@@ -22,7 +22,13 @@ def main() -> int:
     elif args[:2] == ["buildx", "version"]:
         print(os.environ.get("FAKE_DOCKER_BUILDX_VERSION", "github.com/docker/buildx v0.20.0"))
     elif args and args[0] == "compose" and "config" in args:
-        print(os.environ.get("FAKE_DOCKER_COMPOSE_CONFIG", '{"services": {}}'))
+        variable = (
+            "FAKE_DOCKER_COMPOSE_CONFIG"
+            if "--no-interpolate" in args
+            else "FAKE_DOCKER_RESOLVED_COMPOSE_CONFIG"
+        )
+        fallback = os.environ.get("FAKE_DOCKER_COMPOSE_CONFIG", '{"services": {}}')
+        print(os.environ.get(variable, fallback))
     elif args[:3] == ["image", "inspect", "--format"]:
         raw = os.environ.get("FAKE_DOCKER_INSPECT", "[]")
         records = json.loads(raw)

@@ -56,7 +56,7 @@ from docker_package_app.models import (
     RunState,
     Stage,
 )
-from docker_package_app.planning import build_plan
+from docker_package_app.planning import build_plan, compose_file_environment
 from docker_package_app.questions import (
     NO_ENV_OVERRIDES,
     build_questions,
@@ -386,6 +386,29 @@ def _perform_plan(args: argparse.Namespace, paths: WorkPaths) -> dict[str, Any]:
         non_interactive=args.non_interactive or args.json,
     )
     runner = CommandRunner()
+    compose_files = [
+        _resolve_project_path(paths.project_root, value)
+        for value in state.inspection.compose_files
+    ]
+    raw_compose = ComposeDocument.load(
+        paths.project_root,
+        compose_files,
+        state.inspection.profiles,
+        runner,
+    )
+    resolved_compose = ComposeDocument.load(
+        paths.project_root,
+        compose_files,
+        state.inspection.profiles,
+        runner,
+        environment=compose_file_environment(state.inspection, answers),
+        interpolate=True,
+    )
+    resolved_files = discover_file_dependencies(
+        raw_compose,
+        paths.project_root,
+        resolved_compose=resolved_compose,
+    )
     default_app, default_version = default_identity(paths.project_root, runner)
     plan = build_plan(
         state.inspection,
@@ -393,6 +416,7 @@ def _perform_plan(args: argparse.Namespace, paths: WorkPaths) -> dict[str, Any]:
         app_name=args.app_name or default_app,
         version=args.version or default_version,
         platform=args.platform,
+        resolved_files=resolved_files,
     )
     plan_hash = _plan_hash(plan)
     updated = _transition(

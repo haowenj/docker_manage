@@ -10,7 +10,7 @@ from docker_package_app.compose import ComposeDocument
 from docker_package_app.errors import AnswerRequired, PackageError
 from docker_package_app.models import FileAction, FileAssignment, FileCandidate
 
-FileIdentity = tuple[str, str, str, str]
+FileIdentity = tuple[str, str, str]
 FileRewriteKey = tuple[str, str, str]
 
 
@@ -24,32 +24,77 @@ class FileMaterialization:
 def discover_file_dependencies(
     compose: ComposeDocument,
     project_root: Path,
+    *,
+    resolved_compose: ComposeDocument | None = None,
 ) -> tuple[FileCandidate, ...]:
     project = project_root.resolve()
+    final = resolved_compose or compose
     found: list[FileCandidate] = []
 
+    if final.services() != compose.services():
+        raise PackageError("Compose 插值前后的服务集合不一致")
+
     for service in compose.services():
-        config = compose.service(service)
-        volumes = config.get("volumes", ())
-        if isinstance(volumes, list):
-            for volume in volumes:
-                source = _bind_source(volume)
-                if source is not None:
-                    found.append(_candidate(project, service, source, "bind"))
+        raw_config = compose.service(service)
+        final_config = final.service(service)
+        raw_volumes = raw_config.get("volumes", ())
+        final_volumes = final_config.get("volumes", ())
+        if isinstance(raw_volumes, list):
+            if not isinstance(final_volumes, list) or len(final_volumes) != len(raw_volumes):
+                raise PackageError(f"服务 {service} 的 Compose volume 无法一一对应")
+            for index, raw_volume in enumerate(raw_volumes):
+                raw_source = _bind_source(raw_volume)
+                if raw_source is None:
+                    continue
+                final_source = _bind_source(final_volumes[index])
+                if final_source is None:
+                    raise PackageError(
+                        f"服务 {service} 的 bind source 插值结果无效：{raw_source}"
+                    )
+                found.append(
+                    _candidate(
+                        project,
+                        service,
+                        raw_source,
+                        "bind",
+                        effective_path=final_source,
+                    )
+                )
 
         for kind in ("config", "secret"):
-            references = config.get(f"{kind}s", ())
+            references = raw_config.get(f"{kind}s", ())
             if not isinstance(references, list):
                 continue
-            top_level = compose.data.get(f"{kind}s", {})
-            if not isinstance(top_level, dict):
+            raw_definitions = compose.data.get(f"{kind}s", {})
+            final_definitions = final.data.get(f"{kind}s", {})
+            if not isinstance(raw_definitions, dict) or not isinstance(final_definitions, dict):
                 continue
             for reference in references:
                 name = reference.get("source") if isinstance(reference, dict) else reference
-                definition = top_level.get(name) if isinstance(name, str) else None
-                source = definition.get("file") if isinstance(definition, dict) else None
-                if isinstance(source, str):
-                    found.append(_candidate(project, service, source, kind))
+                raw_definition = raw_definitions.get(name) if isinstance(name, str) else None
+                final_definition = final_definitions.get(name) if isinstance(name, str) else None
+                raw_source = (
+                    raw_definition.get("file")
+                    if isinstance(raw_definition, dict)
+                    else None
+                )
+                final_source = (
+                    final_definition.get("file")
+                    if isinstance(final_definition, dict)
+                    else None
+                )
+                if isinstance(raw_source, str):
+                    if not isinstance(final_source, str):
+                        raise PackageError(f"{kind} {name} 的文件路径插值结果无效")
+                    found.append(
+                        _candidate(
+                            project,
+                            service,
+                            raw_source,
+                            kind,
+                            effective_path=final_source,
+                        )
+                    )
 
     unique: dict[tuple[str, str, str, str], FileCandidate] = {}
     for item in found:
@@ -66,10 +111,7 @@ def materialize_files(
     payload_root: Path,
     project_root: Path,
 ) -> FileMaterialization:
-    assignment_by_identity = {
-        _assignment_identity(item): item
-        for item in assignments
-    }
+    assignment_by_identity = {_assignment_identity(item): item for item in assignments}
     payload = payload_root.resolve()
     files_root = payload / "files"
     rewrites: dict[FileRewriteKey, str] = {}
@@ -87,38 +129,40 @@ def materialize_files(
                 f"{candidate.service}/{candidate.kind}/{candidate.compose_value}"
             )
         action = assignment.action
+        source = Path(assignment.resolved_path).resolve()
+        inside_project = source.is_relative_to(project)
+
         if action is FileAction.KEEP_SERVER_PATH:
-            server_source = deployment_source(
+            server_source = required_server_path(
                 project,
-                candidate.resolved_path,
-                candidate.compose_value,
+                assignment.resolved_path,
+                assignment.original_value,
             )
             server_paths.add(server_source)
-            if candidate.kind == "bind" and candidate.inside_project:
+            if candidate.kind == "bind" and inside_project:
                 rewrites[_rewrite_key(candidate)] = server_source
             continue
-        if not candidate.inside_project or not candidate.project_path:
-            raise PackageError(
-                f"无法复制项目目录之外的路径：{candidate.resolved_path}"
-            )
 
-        source = Path(candidate.resolved_path)
+        if not inside_project or not assignment.payload_path:
+            raise PackageError(
+                f"无法复制项目目录之外的路径：{assignment.resolved_path}"
+            )
         if not source.exists():
             raise PackageError(f"本地 Compose 依赖不存在：{source}")
-        files_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        destination = files_root / candidate.project_path
+        destination = payload / assignment.payload_path
         if not destination.resolve(strict=False).is_relative_to(files_root):
-            raise PackageError(f"制品载荷路径不安全：{candidate.project_path}")
-        if candidate.resolved_path not in copied_sources:
+            raise PackageError(f"制品载荷路径不安全：{assignment.payload_path}")
+        files_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if assignment.resolved_path not in copied_sources:
             _copy_dependency(source, destination)
-            copied_sources.add(candidate.resolved_path)
-            copied_bytes += candidate.estimated_size
+            copied_sources.add(assignment.resolved_path)
+            copied_bytes += _path_size(source)
         if candidate.kind == "bind":
             bind_destinations.add(destination)
         rewrites[_rewrite_key(candidate)] = deployment_source(
             project,
-            candidate.resolved_path,
-            candidate.compose_value,
+            assignment.resolved_path,
+            assignment.original_value,
         )
 
     for destination in sorted(bind_destinations):
@@ -145,22 +189,26 @@ def deployment_source(
     return original_value
 
 
+def required_server_path(
+    project_root: Path,
+    resolved_path: str,
+    original_value: str,
+) -> str:
+    root = project_root.resolve()
+    resolved = Path(resolved_path).resolve()
+    if resolved.is_relative_to(root):
+        return deployment_source(root, resolved_path, original_value)
+    if "${" in original_value:
+        return str(resolved)
+    return original_value
+
+
 def _candidate_identity(candidate: FileCandidate) -> FileIdentity:
-    return (
-        candidate.service,
-        candidate.kind,
-        candidate.compose_value,
-        candidate.resolved_path,
-    )
+    return candidate.service, candidate.kind, candidate.compose_value
 
 
 def _assignment_identity(assignment: FileAssignment) -> FileIdentity:
-    return (
-        assignment.service,
-        assignment.kind,
-        assignment.original_value,
-        assignment.resolved_path,
-    )
+    return assignment.service, assignment.kind, assignment.original_value
 
 
 def _rewrite_key(candidate: FileCandidate) -> FileRewriteKey:
@@ -172,8 +220,10 @@ def _candidate(
     service: str,
     raw_path: str,
     kind: str,
+    *,
+    effective_path: str | None = None,
 ) -> FileCandidate:
-    source = Path(raw_path).expanduser()
+    source = Path(effective_path or raw_path).expanduser()
     if not source.is_absolute():
         source = project_root / source
     resolved = source.resolve()

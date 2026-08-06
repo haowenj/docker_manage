@@ -25,7 +25,12 @@ class CliRunner:
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "FAKE_DOCKER_LOG": str(self.log_path),
         }
-        for name in ("FAKE_DOCKER_EXIT", "FAKE_DOCKER_STDERR", "FAKE_DOCKER_INSPECT"):
+        for name in (
+            "FAKE_DOCKER_EXIT",
+            "FAKE_DOCKER_STDERR",
+            "FAKE_DOCKER_INSPECT",
+            "FAKE_DOCKER_RESOLVED_COMPOSE_CONFIG",
+        ):
             self.base_env.pop(name, None)
 
     def __call__(
