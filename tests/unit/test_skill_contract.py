@@ -38,6 +38,35 @@ def test_skill_requires_sparse_environment_overrides_and_confirmation(
     assert "重复运行 `inspect`，直到退出码为 `0`" in skill_text
 
 
+def test_skill_defines_repeat_package_fast_path(skill_text: str) -> None:
+    required = (
+        "重复打包模式",
+        "同时存在且都是普通文件",
+        "`.docker-manage/.env`",
+        "`.docker-manage/ports.json`",
+        "所有问题按 CLI 返回顺序统一编号",
+        "序号: 值",
+        "无修改",
+        "必填且没有默认值",
+        "只追问缺失或无效项",
+    )
+    for text in required:
+        assert text in skill_text
+
+
+def test_skill_confirmation_depends_on_package_mode(skill_text: str) -> None:
+    required = (
+        "首次打包模式",
+        "等待用户明确确认",
+        "重复打包模式",
+        "不等待第二次确认",
+        "立即运行 `package`",
+        "CLI 返回的精确 `plan_hash`",
+    )
+    for text in required:
+        assert text in skill_text
+
+
 def test_skill_preserves_machine_protocol_and_raw_tool_output(skill_text: str) -> None:
     assert "机器协议" in skill_text
     assert "第三方工具的原始输出" in skill_text
