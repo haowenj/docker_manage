@@ -8,6 +8,7 @@ from docker_package_app.models import (
     EnvCandidate,
     FileAction,
     FileAssignment,
+    FileCandidate,
     Inspection,
     PackagePlan,
     PortCandidate,
@@ -29,6 +30,29 @@ def test_file_assignment_records_dependency_kind() -> None:
     restored = FileAssignment.model_validate_json(assignment.model_dump_json())
 
     assert restored.kind == "bind"
+
+
+def test_file_candidate_current_action_is_optional_and_round_trips() -> None:
+    old = FileCandidate.model_validate(
+        {
+            "service": "web",
+            "compose_value": "./data",
+            "resolved_path": "/project/data",
+            "kind": "bind",
+            "inside_project": True,
+            "project_path": "data",
+            "estimated_size": 0,
+        }
+    )
+    assert old.current_action is None
+
+    restored = FileCandidate.model_validate_json(
+        old.model_copy(
+            update={"current_action": FileAction.COPY}
+        ).model_dump_json()
+    )
+
+    assert restored.current_action is FileAction.COPY
 
 
 def test_inspection_round_trips_with_schema_version() -> None:

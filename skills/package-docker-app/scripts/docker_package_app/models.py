@@ -94,6 +94,7 @@ class FileCandidate(StrictModel):
     inside_project: bool
     project_path: str | None = None
     estimated_size: int = Field(ge=0)
+    current_action: FileAction | None = None
 
 
 class EnvAssignment(StrictModel):

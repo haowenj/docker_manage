@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 from docker_package_app.current_config import (
     CURRENT_ENV_SOURCE,
+    CURRENT_MOUNTS_RELATIVE,
     CURRENT_PORTS_RELATIVE,
     artifact_component,
+    attach_current_mounts,
     attach_current_ports,
     attach_current_values,
     write_current_configuration,
@@ -18,6 +20,8 @@ from docker_package_app.models import (
     DefaultValue,
     EnvAssignment,
     EnvCandidate,
+    FileAction,
+    FileCandidate,
     PortAssignment,
     PortCandidate,
     SourceRef,
@@ -33,6 +37,31 @@ def _candidate(service: str, name: str, default: str = "declared") -> EnvCandida
         defaults=(DefaultValue(value=default, source=source),),
         sources=(source,),
     )
+
+
+def _bind(resolved_path: str, *, inside: bool) -> FileCandidate:
+    return FileCandidate(
+        service="web",
+        compose_value=resolved_path,
+        resolved_path=resolved_path,
+        kind="bind",
+        inside_project=inside,
+        project_path=Path(resolved_path).name if inside else None,
+        estimated_size=0,
+    )
+
+
+def _write_mount_snapshot(
+    project: Path,
+    mounts: list[dict[str, str]],
+) -> Path:
+    snapshot = project / CURRENT_MOUNTS_RELATIVE
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text(
+        json.dumps({"schema_version": 1, "mounts": mounts}),
+        encoding="utf-8",
+    )
+    return snapshot
 
 
 def test_missing_snapshot_preserves_discovered_candidates(tmp_path: Path) -> None:
@@ -90,6 +119,81 @@ def test_matched_key_without_value_is_rejected(tmp_path: Path) -> None:
 def test_artifact_component_matches_existing_service_prefix_rule() -> None:
     assert artifact_component("api-web") == "API_WEB"
     assert artifact_component("worker_2") == "WORKER_2"
+
+
+def test_missing_mount_snapshot_preserves_file_candidates(tmp_path: Path) -> None:
+    candidates = (_bind("/project/data", inside=True),)
+
+    attached = attach_current_mounts(tmp_path, candidates)
+
+    assert attached == candidates
+    assert attached[0].current_action is None
+
+
+def test_attach_current_mounts_matches_paths_and_ignores_stale_entries(
+    tmp_path: Path,
+) -> None:
+    _write_mount_snapshot(
+        tmp_path,
+        [
+            {"resolved_path": "/project/data", "action": "copy"},
+            {"resolved_path": "/removed", "action": "keep_server_path"},
+        ],
+    )
+    candidates = (
+        _bind("/project/data", inside=True),
+        _bind("/project/new", inside=True),
+    )
+
+    attached = attach_current_mounts(tmp_path, candidates)
+
+    assert attached[0].current_action is FileAction.COPY
+    assert attached[1].current_action is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "{",
+        '{"schema_version":2,"mounts":[]}',
+        (
+            '{"schema_version":1,"mounts":['
+            '{"resolved_path":"/project/data","action":"copy"},'
+            '{"resolved_path":"/project/data/../data",'
+            '"action":"keep_server_path"}]}'
+        ),
+        (
+            '{"schema_version":1,"mounts":['
+            '{"resolved_path":"/project/data","action":"abort"}]}'
+        ),
+    ),
+)
+def test_attach_current_mounts_rejects_invalid_snapshot(
+    tmp_path: Path,
+    body: str,
+) -> None:
+    snapshot = tmp_path / CURRENT_MOUNTS_RELATIVE
+    snapshot.parent.mkdir()
+    snapshot.write_text(body, encoding="utf-8")
+
+    with pytest.raises(UsageError, match="当前挂载快照"):
+        attach_current_mounts(
+            tmp_path,
+            (_bind("/project/data", inside=True),),
+        )
+
+
+def test_external_bind_rejects_current_copy_action(tmp_path: Path) -> None:
+    _write_mount_snapshot(
+        tmp_path,
+        [{"resolved_path": "/srv/data", "action": "copy"}],
+    )
+
+    with pytest.raises(UsageError, match="项目目录外.*copy"):
+        attach_current_mounts(
+            tmp_path,
+            (_bind("/srv/data", inside=False),),
+        )
 
 
 def test_attach_current_ports_matches_identity_and_ignores_unknown(

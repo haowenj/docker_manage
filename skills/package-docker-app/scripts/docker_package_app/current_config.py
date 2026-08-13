@@ -16,6 +16,8 @@ from docker_package_app.models import (
     DefaultValue,
     EnvAssignment,
     EnvCandidate,
+    FileAction,
+    FileCandidate,
     PortAssignment,
     PortCandidate,
     SourceRef,
@@ -25,6 +27,8 @@ from docker_package_app.models import (
 CURRENT_ENV_RELATIVE = Path(".docker-manage/.env")
 CURRENT_ENV_SOURCE = CURRENT_ENV_RELATIVE.as_posix()
 CURRENT_PORTS_RELATIVE = Path(".docker-manage/ports.json")
+CURRENT_MOUNTS_RELATIVE = Path(".docker-manage/mounts.json")
+CURRENT_MOUNTS_SOURCE = CURRENT_MOUNTS_RELATIVE.as_posix()
 
 
 class _PortSnapshotEntry(StrictModel):
@@ -38,6 +42,16 @@ class _PortSnapshotEntry(StrictModel):
 class _PortSnapshot(StrictModel):
     schema_version: Literal[1] = 1
     ports: tuple[_PortSnapshotEntry, ...] = ()
+
+
+class _MountSnapshotEntry(StrictModel):
+    resolved_path: str
+    action: FileAction
+
+
+class _MountSnapshot(StrictModel):
+    schema_version: Literal[1] = 1
+    mounts: tuple[_MountSnapshotEntry, ...] = ()
 
 
 def artifact_component(value: str) -> str:
@@ -135,6 +149,47 @@ def attach_current_ports(
         )
         for candidate in candidates
     )
+
+
+def attach_current_mounts(
+    project_root: Path,
+    candidates: Sequence[FileCandidate],
+) -> tuple[FileCandidate, ...]:
+    snapshot = project_root.resolve() / CURRENT_MOUNTS_RELATIVE
+    if not snapshot.exists():
+        return tuple(candidates)
+    if not snapshot.is_file():
+        raise UsageError(f"当前挂载快照不是普通文件：{snapshot}")
+    try:
+        body = _MountSnapshot.model_validate_json(
+            snapshot.read_text(encoding="utf-8")
+        )
+        selections: dict[str, FileAction] = {}
+        for item in body.mounts:
+            raw_path = Path(item.resolved_path)
+            if not raw_path.is_absolute():
+                raise ValueError(f"挂载路径不是绝对路径：{item.resolved_path}")
+            resolved_path = str(raw_path.resolve())
+            if resolved_path in selections:
+                raise ValueError(f"挂载路径重复：{resolved_path}")
+            selections[resolved_path] = item.action
+    except (OSError, ValidationError, ValueError) as exc:
+        raise UsageError(f"当前挂载快照无效 {snapshot}：{exc}") from exc
+
+    attached: list[FileCandidate] = []
+    for candidate in candidates:
+        if candidate.kind != "bind":
+            attached.append(candidate)
+            continue
+        resolved_path = str(Path(candidate.resolved_path).resolve())
+        action = selections.get(resolved_path)
+        if action is FileAction.COPY and not candidate.inside_project:
+            raise UsageError(
+                f"当前挂载快照无效 {snapshot}：项目目录外路径 "
+                f"{resolved_path} 不能使用 copy"
+            )
+        attached.append(candidate.model_copy(update={"current_action": action}))
+    return tuple(attached)
 
 
 def write_current_environment(
