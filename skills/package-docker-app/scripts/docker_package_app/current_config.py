@@ -17,6 +17,7 @@ from docker_package_app.models import (
     EnvAssignment,
     EnvCandidate,
     FileAction,
+    FileAssignment,
     FileCandidate,
     PortAssignment,
     PortCandidate,
@@ -260,6 +261,32 @@ def write_current_ports(
     return _atomic_write_snapshot(target, body)
 
 
+def write_current_mounts(
+    project_root: Path,
+    assignments: Sequence[FileAssignment],
+) -> Path:
+    target = project_root.resolve() / CURRENT_MOUNTS_RELATIVE
+    actions: dict[str, FileAction] = {}
+    for item in assignments:
+        if item.kind != "bind":
+            continue
+        raw_path = Path(item.resolved_path)
+        if not raw_path.is_absolute():
+            raise PackageError(f"挂载快照路径不是绝对路径：{item.resolved_path}")
+        resolved_path = str(raw_path.resolve())
+        previous = actions.get(resolved_path)
+        if previous is not None and previous is not item.action:
+            raise PackageError(f"同一挂载路径的决策冲突：{resolved_path}")
+        actions[resolved_path] = item.action
+    body = _MountSnapshot(
+        mounts=tuple(
+            _MountSnapshotEntry(resolved_path=path, action=actions[path])
+            for path in sorted(actions)
+        )
+    ).model_dump_json(indent=2) + "\n"
+    return _atomic_write_snapshot(target, body)
+
+
 def _atomic_write_snapshot(target: Path, body: str) -> Path:
     temporary: Path | None = None
     try:
@@ -291,11 +318,13 @@ def write_current_configuration(
     project_root: Path,
     environment: Sequence[EnvAssignment],
     ports: Sequence[PortAssignment],
-) -> tuple[Path, Path]:
+    files: Sequence[FileAssignment] = (),
+) -> tuple[Path, Path, Path]:
     root = project_root.resolve()
     targets = (
         root / CURRENT_ENV_RELATIVE,
         root / CURRENT_PORTS_RELATIVE,
+        root / CURRENT_MOUNTS_RELATIVE,
     )
     previous: dict[Path, tuple[bytes | None, int | None]] = {}
     try:
@@ -313,7 +342,8 @@ def write_current_configuration(
     try:
         env_path = write_current_environment(root, environment)
         ports_path = write_current_ports(root, ports)
-        return env_path, ports_path
+        mounts_path = write_current_mounts(root, files)
+        return env_path, ports_path, mounts_path
     except PackageError as original:
         failures: list[str] = []
         for target, (body, mode) in previous.items():

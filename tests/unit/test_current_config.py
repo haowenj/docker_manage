@@ -13,6 +13,7 @@ from docker_package_app.current_config import (
     attach_current_values,
     write_current_configuration,
     write_current_environment,
+    write_current_mounts,
     write_current_ports,
 )
 from docker_package_app.errors import PackageError, UsageError
@@ -21,6 +22,7 @@ from docker_package_app.models import (
     EnvAssignment,
     EnvCandidate,
     FileAction,
+    FileAssignment,
     FileCandidate,
     PortAssignment,
     PortCandidate,
@@ -62,6 +64,26 @@ def _write_mount_snapshot(
         encoding="utf-8",
     )
     return snapshot
+
+
+def _file_assignment(
+    service: str,
+    resolved_path: str,
+    kind: str,
+    action: FileAction,
+) -> FileAssignment:
+    return FileAssignment(
+        service=service,
+        original_value=resolved_path,
+        resolved_path=resolved_path,
+        kind=kind,
+        action=action,
+        payload_path=(
+            f"files/{Path(resolved_path).name}"
+            if action is FileAction.COPY
+            else None
+        ),
+    )
 
 
 def test_missing_snapshot_preserves_discovered_candidates(tmp_path: Path) -> None:
@@ -343,6 +365,43 @@ def test_write_current_ports_is_complete_sorted_and_private(
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+def test_write_current_mounts_is_bind_only_deduplicated_and_private(
+    tmp_path: Path,
+) -> None:
+    path = write_current_mounts(
+        tmp_path,
+        (
+            _file_assignment("web", "/project/data", "bind", FileAction.COPY),
+            _file_assignment("worker", "/project/data", "bind", FileAction.COPY),
+            _file_assignment(
+                "web",
+                "/project/server-data",
+                "bind",
+                FileAction.KEEP_SERVER_PATH,
+            ),
+            _file_assignment(
+                "web",
+                "/project/app.ini",
+                "config",
+                FileAction.COPY,
+            ),
+        ),
+    )
+
+    assert path == tmp_path / ".docker-manage/mounts.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "mounts": [
+            {"resolved_path": "/project/data", "action": "copy"},
+            {
+                "resolved_path": "/project/server-data",
+                "action": "keep_server_path",
+            },
+        ],
+    }
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
 def test_write_failure_preserves_previous_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -414,3 +473,100 @@ def test_configuration_write_restores_environment_when_ports_fail(
     assert ports_path.read_text(encoding="utf-8") == (
         '{"schema_version":1,"ports":[]}\n'
     )
+
+
+def test_configuration_write_restores_all_snapshots_when_mounts_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".docker-manage/.env"
+    ports_path = tmp_path / ".docker-manage/ports.json"
+    mounts_path = tmp_path / ".docker-manage/mounts.json"
+    env_path.parent.mkdir()
+    env_path.write_text("PORT='last-good'\n", encoding="utf-8")
+    ports_path.write_text(
+        '{"schema_version":1,"ports":[]}\n',
+        encoding="utf-8",
+    )
+    mounts_path.write_text(
+        '{"schema_version":1,"mounts":[]}\n',
+        encoding="utf-8",
+    )
+    env_path.chmod(0o640)
+    ports_path.chmod(0o644)
+    mounts_path.chmod(0o600)
+    previous = {
+        path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+        for path in (env_path, ports_path, mounts_path)
+    }
+
+    def fail_mounts(_root: Path, _files: object) -> Path:
+        raise PackageError("mounts failed")
+
+    monkeypatch.setattr(
+        "docker_package_app.current_config.write_current_mounts",
+        fail_mounts,
+    )
+
+    with pytest.raises(PackageError, match="mounts failed"):
+        write_current_configuration(
+            tmp_path,
+            (
+                EnvAssignment(
+                    service="web",
+                    container_name="PORT",
+                    artifact_name="PORT",
+                    value="next",
+                ),
+            ),
+            (
+                PortAssignment(
+                    service="web",
+                    container_port=8000,
+                    exposed=True,
+                    host_port=8322,
+                ),
+            ),
+            (
+                _file_assignment(
+                    "web",
+                    "/project/data",
+                    "bind",
+                    FileAction.COPY,
+                ),
+            ),
+        )
+
+    for path, (body, mode) in previous.items():
+        assert path.read_bytes() == body
+        assert stat.S_IMODE(path.stat().st_mode) == mode
+
+
+def test_configuration_write_removes_new_mount_snapshot_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".docker-manage/.env"
+    ports_path = tmp_path / ".docker-manage/ports.json"
+    mounts_path = tmp_path / ".docker-manage/mounts.json"
+    env_path.parent.mkdir()
+    env_path.write_text("PORT='last-good'\n", encoding="utf-8")
+    ports_path.write_text(
+        '{"schema_version":1,"ports":[]}\n',
+        encoding="utf-8",
+    )
+
+    def write_then_fail(root: Path, _files: object) -> Path:
+        target = root / CURRENT_MOUNTS_RELATIVE
+        target.write_text("new", encoding="utf-8")
+        raise PackageError("mounts failed")
+
+    monkeypatch.setattr(
+        "docker_package_app.current_config.write_current_mounts",
+        write_then_fail,
+    )
+
+    with pytest.raises(PackageError, match="mounts failed"):
+        write_current_configuration(tmp_path, (), (), ())
+
+    assert not mounts_path.exists()

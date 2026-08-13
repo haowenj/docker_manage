@@ -513,6 +513,7 @@ def _perform_package(args: argparse.Namespace, paths: WorkPaths) -> dict[str, An
         paths.project_root,
         plan.environment,
         plan.ports,
+        plan.files,
     )
     state = _transition(state, Stage.PACKAGED, archive=str(archive))
     atomic_write_model(paths.state, state)
