@@ -20,6 +20,7 @@ from docker_package_app.artifact import (
 from docker_package_app.command import CommandRunner
 from docker_package_app.compose import ComposeDocument
 from docker_package_app.current_config import (
+    CURRENT_MOUNTS_RELATIVE,
     attach_current_mounts,
     attach_current_ports,
     attach_current_values,
@@ -57,7 +58,11 @@ from docker_package_app.models import (
     RunState,
     Stage,
 )
-from docker_package_app.planning import build_plan, compose_file_environment
+from docker_package_app.planning import (
+    build_plan,
+    compose_current_file_environment,
+    compose_file_environment,
+)
 from docker_package_app.questions import (
     NO_ENV_OVERRIDES,
     build_questions,
@@ -368,8 +373,25 @@ def _perform_inspect(
         update={
             "env": attach_current_values(project, inspection.env),
             "ports": attach_current_ports(project, inspection.ports),
-            "files": attach_current_mounts(project, inspection.files),
         }
+    )
+    current_files = inspection.files
+    if (project / CURRENT_MOUNTS_RELATIVE).exists():
+        current_compose = ComposeDocument.load(
+            project,
+            compose_files,
+            args.profile,
+            runner,
+            environment=compose_current_file_environment(inspection),
+            interpolate=True,
+        )
+        current_files = discover_file_dependencies(
+            compose,
+            project,
+            resolved_compose=current_compose,
+        )
+    inspection = inspection.model_copy(
+        update={"files": attach_current_mounts(project, current_files)}
     )
     questions = (*build_questions(inspection), *extra_questions)
     _store_initial(paths, inspection)

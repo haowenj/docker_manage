@@ -253,6 +253,82 @@ def test_inspect_rejects_external_current_copy_action(
     assert "copy" in inspected.stderr
 
 
+def test_inspect_matches_mount_snapshot_after_current_env_interpolation(
+    cli: CliRunner,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "current-interpolated-mount"
+    project.mkdir()
+    (project / "compose.yaml").write_text(
+        """services:
+  app:
+    image: busybox:1.36
+    environment:
+      DATA_DIR: ${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}
+    volumes:
+      - type: bind
+        source: ${DOCKER_MANAGE_DATA_DIR:-${PWD}/data}
+        target: /data
+""",
+        encoding="utf-8",
+    )
+    current = project / ".docker-manage"
+    current.mkdir()
+    (current / ".env").write_text(
+        "DOCKER_MANAGE_DATA_DIR='/data/docker-manage-server'\n",
+        encoding="utf-8",
+    )
+    (current / "ports.json").write_text(
+        '{"schema_version":1,"ports":[]}\n',
+        encoding="utf-8",
+    )
+    (current / "mounts.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "mounts": [
+                    {
+                        "resolved_path": "/data/docker-manage-server",
+                        "action": "keep_server_path",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    resolved = {
+        "services": {
+            "app": {
+                "image": "busybox:1.36",
+                "environment": {"DATA_DIR": "/data/docker-manage-server"},
+                "volumes": [
+                    {
+                        "type": "bind",
+                        "source": "/data/docker-manage-server",
+                        "target": "/data",
+                    }
+                ],
+            }
+        }
+    }
+
+    inspected = cli(
+        "inspect",
+        str(project),
+        "--json",
+        env={"FAKE_DOCKER_RESOLVED_COMPOSE_CONFIG": json.dumps(resolved)},
+    )
+
+    assert inspected.returncode == 0, inspected.stderr
+    body = json.loads(inspected.stdout)
+    file_candidate = body["files"][0]
+    assert file_candidate["resolved_path"] == "/data/docker-manage-server"
+    assert file_candidate["current_action"] == "keep_server_path"
+    question = next(item for item in body["questions"] if item["kind"] == "file")
+    assert question["default"] == "keep_server_path"
+    assert ".docker-manage/mounts.json" in question["prompt"]
+
+
 def test_dry_run_stops_before_docker_mutations(
     cli: CliRunner,
     compose_project: Path,

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from docker_package_app.current_config import artifact_component
-from docker_package_app.errors import AnswerRequired, PlanValidationError
+from docker_package_app.errors import AnswerRequired, PlanValidationError, UsageError
 from docker_package_app.models import (
     AnswerBook,
     BuildArgAssignment,
@@ -33,6 +33,28 @@ IMAGE_PATTERN = re.compile(
     r"(?:@sha256:[a-f0-9]{64})?$"
 )
 COMPOSE_VARIABLE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def compose_current_file_environment(inspection: Inspection) -> dict[str, str]:
+    referenced = {
+        match.group(1)
+        for item in inspection.files
+        for match in COMPOSE_VARIABLE_PATTERN.finditer(item.compose_value)
+    }
+    environment = {"PWD": inspection.project_root}
+    for name in sorted(referenced - {"PWD"}):
+        values = {
+            item.current.value
+            for item in inspection.env
+            if item.name == name and item.current is not None
+        }
+        if len(values) > 1:
+            raise UsageError(
+                f"Compose 插值变量 {name} 在当前配置中的值不一致"
+            )
+        if values:
+            environment[name] = values.pop()
+    return environment
 
 
 def compose_file_environment(
