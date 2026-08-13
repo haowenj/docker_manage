@@ -25,6 +25,8 @@ description: 检查本地应用，在不修改现有项目文件的前提下补�
 - 模型不得直接编辑 `.docker-manage/.env`。只有随附 CLI 可以在完整成功打包后原子更新该文件。
 - `<project>/.docker-manage/ports.json` 表示最近一次完整成功打包使用的项目级当前端口配置；不得从历史 `state.json` 推断当前端口。
 - 模型不得直接编辑 `.docker-manage/ports.json`。只有随附 CLI 可以在完整成功打包后与 `.env` 一起更新该文件。
+- `<project>/.docker-manage/mounts.json` 表示最近一次完整成功打包使用的 bind mount 决策；不得从历史 `state.json`、旧答案、manifest 或归档推断当前挂载决策。
+- 模型不得直接编辑 `.docker-manage/mounts.json`。只有随附 CLI 可以在完整成功打包后与 `.env`、`ports.json` 一起更新三份当前配置快照。
 - 复制进归档的 bind mount 副本递归设置权限：目录权限为 `0777`，普通文件权限为 `0666`。不得跟随符号链接，不得修改原项目文件权限、Compose `configs`、`secrets` 或保留的服务器路径权限。
 - 每个 bind mount 都必须在计划前明确决定：项目内路径可选 `copy`（复制本机内容）、`keep_server_path`（保留服务器现有路径）或 `abort`（中止）；项目外路径只允许 `keep_server_path` 或 `abort`。项目内 bind 默认值为 `keep_server_path`，但答案文件仍必须包含最终决定。
 - 选择 `keep_server_path` 时，本机 source 及其内容不得进入归档。项目内 bind 的部署 Compose 必须继续使用与 `copy` 相同的稳定部署路径 `./files/<项目相对路径>`；项目外 bind 保留原始 source。部署 Compose、manifest 和结果输出不得包含开发电脑的绝对路径，包括 Docker Compose 自动解析出的路径。CLI 不得创建、清空、修改该服务器路径或改变其权限。普通覆盖式重复解压不会覆盖归档中不存在的保留路径。
@@ -59,6 +61,9 @@ EXIT_MODEL_REQUIRED=20
    **重复打包模式**；否则进入 **首次打包模式**。只存在其中一个快照时不得
    复用配置。路径存在但不是普通文件时不进入重复打包模式；后续 `inspect`
    若报告快照无效，按 CLI 错误停止。不得读取或修改快照来完成这项模式判定。
+   `.docker-manage/mounts.json` 不参与模式判定：旧项目缺少挂载快照时继续进入
+   重复打包模式，bind mount 使用下述通用安全默认值；本次完整成功后由 CLI 自动
+   补齐。挂载快照存在但不是普通文件或内容无效时，按 `inspect` 的 CLI 错误停止。
 
    运行：
 
@@ -72,7 +77,11 @@ EXIT_MODEL_REQUIRED=20
    从 `1` 开始。每项显示问题 ID、中文提示、完整当前配置及来源、声明默认值及
    来源、最终默认答案、机器选项和中文含义。第三方镜像继续显示醒目的
    `【重要】` 警告；bind mount 继续显示使用服务、原始 source、解析路径、
-   项目内外位置、估算大小、稳定部署路径、完整默认值和归档行为。完整显示
+   项目内外位置、估算大小、稳定部署路径、当前挂载决策及来源、通用声明默认值、
+   最终默认答案和归档行为。上次选择 `copy` 时最终默认答案仍为 `copy`；
+   上次选择 `keep_server_path` 时最终默认答案仍为 `keep_server_path`。缺少挂载快照、新增
+   bind 或解析路径变化时不得声称来自上次打包，而应使用第 4 步的通用安全默认值。
+   完整显示
    密码、Token 和 Key，不得脱敏。
 
    只询问一次：`如需修改，请回复“序号: 值”；全部沿用以上默认答案请回复
@@ -140,7 +149,7 @@ EXIT_MODEL_REQUIRED=20
 
    不得替换为重新计算或编辑后的哈希。CLI 会在任何 Docker 变更之前拒绝已改变的计划。
 
-   CLI 只有完整成功打包后才会一起更新 `.docker-manage/.env` 和 `.docker-manage/ports.json`。`inspect`、`plan`、`--dry-run`、等待模型补充和失败任务不得改变当前环境变量或当前端口配置快照。
+   CLI 只有完整成功打包后才会一起更新 `.docker-manage/.env`、`.docker-manage/ports.json` 和 `.docker-manage/mounts.json`。任一快照写入失败时必须恢复三者的旧状态。`inspect`、`plan`、`--dry-run`、等待模型补充和失败任务不得改变当前环境变量、当前端口或当前挂载决策快照。
 
 10. 用中文报告最终归档路径、大小、SHA-256、已打包镜像列表、复用的服务器镜像列表和服务器所需路径。
 

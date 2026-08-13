@@ -128,3 +128,17 @@ def test_skill_requires_explicit_bind_copy_or_server_preservation(
     )
     for text in required:
         assert text in skill_text
+
+
+def test_skill_reuses_current_mount_decision_snapshot(skill_text: str) -> None:
+    required = (
+        ".docker-manage/mounts.json",
+        "最近一次完整成功打包使用的 bind mount 决策",
+        "上次选择 `copy`",
+        "上次选择 `keep_server_path`",
+        "缺少挂载快照",
+        "不得从历史 `state.json`",
+        "一起更新",
+    )
+    for text in required:
+        assert text in skill_text
