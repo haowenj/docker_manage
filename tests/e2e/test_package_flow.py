@@ -70,6 +70,37 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
     ]
     assert output["reused_images"] == ["registry.intra/redis:7-approved"]
     assert output["server_paths"] == ["./files/data"]
+    mounts_snapshot = project / ".docker-manage/mounts.json"
+    assert json.loads(mounts_snapshot.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "mounts": [
+            {
+                "resolved_path": str((project / "config").resolve()),
+                "action": "copy",
+            },
+            {
+                "resolved_path": str((project / "data").resolve()),
+                "action": "keep_server_path",
+            },
+        ],
+    }
+
+    inspected = cli("inspect", str(project), "--json")
+    assert inspected.returncode == 0, inspected.stderr
+    questions = {
+        item["id"]: item for item in json.loads(inspected.stdout)["questions"]
+    }
+    config_question = questions[
+        _file_question_id(str((project / "config").resolve()))
+    ]
+    data_question = questions[
+        _file_question_id(str((project / "data").resolve()))
+    ]
+    assert config_question["default"] == "copy"
+    assert data_question["default"] == "keep_server_path"
+    assert ".docker-manage/mounts.json" in config_question["prompt"]
+    assert ".docker-manage/mounts.json" in data_question["prompt"]
+
     with tarfile.open(archive_path, "r:gz") as bundle:
         compose = yaml.safe_load(bundle.extractfile("compose.yaml"))
         assert all(
@@ -181,6 +212,81 @@ def test_successful_package_becomes_next_inspection_current_config(
     assert port_questions["port.web.8000/tcp.expose"]["default"] == "yes"
     assert port_questions["port.web.8000/tcp.host"]["default"] == "8080"
     assert "当前配置" in port_questions["port.web.8000/tcp.expose"]["prompt"]
+
+
+def test_legacy_snapshots_gain_mount_snapshot_after_successful_package(
+    cli: CliRunner,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "legacy-mount-snapshot"
+    project.mkdir()
+    data = project / "data"
+    data.mkdir()
+    (data / "seed.db").write_text("seed", encoding="utf-8")
+    (project / "compose.yaml").write_text(
+        """services:
+  app:
+    image: busybox:1.36
+    volumes:
+      - ./data:/data
+""",
+        encoding="utf-8",
+    )
+    current = project / ".docker-manage"
+    current.mkdir()
+    (current / ".env").write_text("", encoding="utf-8")
+    (current / "ports.json").write_text(
+        '{"schema_version":1,"ports":[]}\n',
+        encoding="utf-8",
+    )
+
+    inspected = cli("inspect", str(project), "--json")
+    assert inspected.returncode == 0, inspected.stderr
+    question_id = _file_question_id(str(data.resolve()))
+    question = next(
+        item
+        for item in json.loads(inspected.stdout)["questions"]
+        if item["id"] == question_id
+    )
+    assert question["default"] == "keep_server_path"
+    assert ".docker-manage/mounts.json" not in question["prompt"]
+
+    answers = project / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "image.app.decision": "打包",
+                    question_id: "copy",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    answers.chmod(0o600)
+    packaged = cli(
+        "run",
+        str(project),
+        "--non-interactive",
+        "--answers",
+        str(answers),
+        "--app-name",
+        "legacy-app",
+        "--version",
+        "v1",
+        "--json",
+        env={"FAKE_DOCKER_INSPECT": json.dumps([_metadata("sha256:app")])},
+    )
+
+    assert packaged.returncode == 0, packaged.stderr
+    assert json.loads(
+        (current / "mounts.json").read_text(encoding="utf-8")
+    ) == {
+        "schema_version": 1,
+        "mounts": [
+            {"resolved_path": str(data.resolve()), "action": "copy"}
+        ],
+    }
 
 
 def _has_docker_compose() -> bool:
