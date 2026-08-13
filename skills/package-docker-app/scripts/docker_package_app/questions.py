@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
+from docker_package_app.current_config import CURRENT_MOUNTS_SOURCE
 from docker_package_app.errors import AnswerRequired, PlanValidationError
 from docker_package_app.models import FileCandidate, Inspection, Question
 
@@ -150,6 +151,22 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
             choices = ("keep_server_path", "abort")
             default = None
             meaning = "keep_server_path（保留服务器路径）或 abort（中止）"
+        current_actions = {item.current_action for item in candidates}
+        current_text = ""
+        if current_actions != {None}:
+            if None in current_actions or len(current_actions) != 1:
+                raise PlanValidationError(
+                    f"本地依赖 {resolved_path} 的当前挂载配置不一致"
+                )
+            current_action = current_actions.pop()
+            if current_action is None or current_action.value not in choices:
+                raise PlanValidationError(
+                    f"本地依赖 {resolved_path} 的当前挂载配置无效"
+                )
+            default = current_action.value
+            current_text = (
+                f"当前配置值：{default}，来源：{CURRENT_MOUNTS_SOURCE}；"
+            )
         questions.append(
             Question(
                 id=_file_question_id(resolved_path),
@@ -158,7 +175,8 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
                     f"本地依赖 {resolved_path} 位于{location}；"
                     f"服务：{services}；类型：{kinds}；"
                     f"Compose source：{compose_values}；"
-                    f"估算大小：{estimated_size} 字节。请选择 {meaning}。"
+                    f"估算大小：{estimated_size} 字节；{current_text}"
+                    f"请选择 {meaning}。"
                 ),
                 default=default,
                 choices=choices,

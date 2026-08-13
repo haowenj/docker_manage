@@ -166,6 +166,93 @@ def test_inspect_and_plan_use_current_port_snapshot(
     assert json.loads(planned.stdout)["plan"]["ports"][0]["host_port"] == 8322
 
 
+def test_inspect_uses_current_mount_snapshot(
+    cli: CliRunner,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "current-mount"
+    project.mkdir()
+    data = project / "data"
+    data.mkdir()
+    (project / "compose.yaml").write_text(
+        """services:
+  web:
+    image: busybox:1.36
+    volumes:
+      - ./data:/data
+""",
+        encoding="utf-8",
+    )
+    snapshot = project / ".docker-manage/mounts.json"
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "mounts": [
+                    {"resolved_path": str(data.resolve()), "action": "copy"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inspected = cli("inspect", str(project), "--json")
+
+    assert inspected.returncode == 0, inspected.stderr
+    body = json.loads(inspected.stdout)
+    assert body["files"][0]["current_action"] == "copy"
+    question = next(
+        item
+        for item in body["questions"]
+        if item["id"] == _file_question_id(str(data.resolve()))
+    )
+    assert question["default"] == "copy"
+    assert "当前配置值：copy" in question["prompt"]
+    assert "来源：.docker-manage/mounts.json" in question["prompt"]
+
+
+def test_inspect_rejects_external_current_copy_action(
+    cli: CliRunner,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "external-current-copy"
+    project.mkdir()
+    external = tmp_path / "server-data"
+    external.mkdir()
+    (project / "compose.yaml").write_text(
+        f"""services:
+  web:
+    image: busybox:1.36
+    volumes:
+      - {external}:/data
+""",
+        encoding="utf-8",
+    )
+    snapshot = project / ".docker-manage/mounts.json"
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "mounts": [
+                    {
+                        "resolved_path": str(external.resolve()),
+                        "action": "copy",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inspected = cli("inspect", str(project), "--json")
+
+    assert inspected.returncode == 2
+    assert "项目目录外" in inspected.stderr
+    assert "copy" in inspected.stderr
+
+
 def test_dry_run_stops_before_docker_mutations(
     cli: CliRunner,
     compose_project: Path,

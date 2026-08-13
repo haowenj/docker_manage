@@ -6,6 +6,7 @@ from docker_package_app.models import (
     CurrentPortSelection,
     DefaultValue,
     EnvCandidate,
+    FileAction,
     FileCandidate,
     ImageCandidate,
     Inspection,
@@ -68,6 +69,32 @@ def test_project_bind_question_offers_copy_keep_and_abort() -> None:
     assert "/project/data" in question.prompt
     assert "项目目录内" in question.prompt
     assert "2048" in question.prompt
+
+
+@pytest.mark.parametrize(
+    "action",
+    (FileAction.COPY, FileAction.KEEP_SERVER_PATH),
+)
+def test_current_bind_action_becomes_default_and_shows_source(
+    action: FileAction,
+) -> None:
+    candidate = _file(
+        service="web",
+        source="./data",
+        resolved="/project/data",
+    ).model_copy(update={"current_action": action})
+    inspection = Inspection(
+        run_id="run-1",
+        project_root="/project",
+        stage=Stage.INSPECTED,
+        files=(candidate,),
+    )
+
+    question = build_questions(inspection)[0]
+
+    assert question.default == action.value
+    assert f"当前配置值：{action.value}" in question.prompt
+    assert "来源：.docker-manage/mounts.json" in question.prompt
 
 
 def test_shared_bind_source_generates_one_question() -> None:
