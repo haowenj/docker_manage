@@ -60,6 +60,51 @@ def test_valid_supplement_adds_explicit_env(tmp_path: Path) -> None:
     assert [(item.service, item.name) for item in merged.env] == [("web", "API_URL")]
 
 
+def test_generated_dockerfile_may_be_in_project_root(tmp_path: Path) -> None:
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    path = _write(
+        tmp_path / "supplement.json",
+        _payload(generated_files=[{"kind": "dockerfile", "path": "Dockerfile"}]),
+    )
+
+    supplement = load_supplement(
+        path,
+        tmp_path,
+        tmp_path / ".docker-manage/generated",
+        {"web"},
+    )
+
+    assert supplement.generated_files[0].path == "Dockerfile"
+
+
+def test_generated_compose_may_be_in_project_root(tmp_path: Path) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    path = _write(
+        tmp_path / "supplement.json",
+        _payload(generated_files=[{"kind": "compose", "path": "compose.yaml"}]),
+    )
+
+    supplement = load_supplement(
+        path,
+        tmp_path,
+        tmp_path / ".docker-manage/generated",
+        {"web"},
+    )
+
+    assert supplement.generated_files[0].path == "compose.yaml"
+
+
+def test_generated_root_file_must_use_standard_docker_name(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("docs\n", encoding="utf-8")
+    path = _write(
+        tmp_path / "supplement.json",
+        _payload(generated_files=[{"kind": "dockerfile", "path": "README.md"}]),
+    )
+
+    with pytest.raises(SupplementValidationError, match="标准"):
+        load_supplement(path, tmp_path, tmp_path / ".docker-manage/generated", {"web"})
+
+
 def test_generated_file_must_stay_in_generated_root(tmp_path: Path) -> None:
     path = _write(
         tmp_path / "supplement.json",

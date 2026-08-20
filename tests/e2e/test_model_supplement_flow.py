@@ -7,7 +7,7 @@ from pathlib import Path
 from conftest import CliRunner
 
 
-def test_missing_docker_files_are_generated_only_in_tool_directory(
+def test_missing_docker_files_are_generated_in_project_root_and_reused(
     cli: CliRunner,
     tmp_path: Path,
 ) -> None:
@@ -21,18 +21,18 @@ def test_missing_docker_files_are_generated_only_in_tool_directory(
     run_id = json.loads(initial.stdout)["run_id"]
 
     generated = project / ".docker-manage/generated"
-    dockerfile = generated / "Dockerfile"
+    dockerfile = project / "Dockerfile"
     dockerfile.write_text(
         "FROM python:3.12-slim\nWORKDIR /app\nCOPY . .\nCMD [\"python\", \"app.py\"]\n",
         encoding="utf-8",
     )
-    compose = generated / "compose.yaml"
+    compose = project / "compose.yaml"
     compose_data = {
         "services": {
             "web": {
                 "build": {
                     "context": ".",
-                    "dockerfile": ".docker-manage/generated/Dockerfile",
+                    "dockerfile": "Dockerfile",
                 },
                 "environment": {"PORT": "${PORT:-8000}"},
                 "ports": ["8000:8000"],
@@ -44,7 +44,7 @@ def test_missing_docker_files_are_generated_only_in_tool_directory(
   web:
     build:
       context: .
-      dockerfile: .docker-manage/generated/Dockerfile
+      dockerfile: Dockerfile
     environment:
       PORT: ${PORT:-8000}
     ports:
@@ -60,11 +60,11 @@ def test_missing_docker_files_are_generated_only_in_tool_directory(
                 "generated_files": [
                     {
                         "kind": "dockerfile",
-                        "path": ".docker-manage/generated/Dockerfile",
+                        "path": "Dockerfile",
                     },
                     {
                         "kind": "compose",
-                        "path": ".docker-manage/generated/compose.yaml",
+                        "path": "compose.yaml",
                     },
                 ],
                 "environment": [
@@ -128,9 +128,18 @@ def test_missing_docker_files_are_generated_only_in_tool_directory(
         "port.web.8000/tcp.expose",
         "port.web.8000/tcp.host",
     ]
-    assert _project_files(project, exclude_tool_state=True) == original_files
-    assert not (project / "Dockerfile").exists()
-    assert not (project / "compose.yaml").exists()
+    project_files = _project_files(project, exclude_tool_state=True)
+    assert project_files["Dockerfile"] == dockerfile.read_bytes()
+    assert project_files["compose.yaml"] == compose.read_bytes()
+    for relative, content in original_files.items():
+        assert project_files[relative] == content
+
+    reused = cli("inspect", str(project), "--json")
+
+    assert reused.returncode == 0, reused.stderr
+    reused_body = json.loads(reused.stdout)
+    assert reused_body["dockerfiles"] == ["Dockerfile"]
+    assert reused_body["compose_files"] == ["compose.yaml"]
 
 
 def _project_files(project: Path, *, exclude_tool_state: bool = False) -> dict[str, bytes]:

@@ -67,6 +67,18 @@ def test_skill_confirmation_depends_on_package_mode(skill_text: str) -> None:
         assert text in skill_text
 
 
+def test_skill_generates_missing_configs_in_project_root(skill_text: str) -> None:
+    required = (
+        "项目根目录创建缺失",
+        "不得覆盖已有项目文件",
+        "后续打包直接复用",
+        "不再传入 `--supplement`",
+        "`.docker-manage/generated/` 下的旧文件继续兼容",
+    )
+    for text in required:
+        assert text in skill_text
+
+
 def test_skill_preserves_machine_protocol_and_raw_tool_output(skill_text: str) -> None:
     assert "机器协议" in skill_text
     assert "第三方工具的原始输出" in skill_text
