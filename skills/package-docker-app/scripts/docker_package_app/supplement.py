@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, ValidationError
 
+from docker_package_app.discovery import COMPOSE_NAMES
 from docker_package_app.envscan import merge_defaults
 from docker_package_app.errors import SupplementValidationError
 from docker_package_app.models import (
@@ -57,15 +58,8 @@ def load_supplement(
         raise SupplementValidationError(f"模型补充文件无效：{exc}") from exc
 
     project = project_root.resolve()
-    generated = generated_root.resolve()
     for item in supplement.generated_files:
-        candidate = _resolve_from_project(project, item.path)
-        if not candidate.is_relative_to(generated):
-            raise SupplementValidationError(
-                f"生成文件必须位于 {generated} 之下：{item.path}"
-            )
-        if not candidate.is_file():
-            raise SupplementValidationError(f"生成文件不存在：{candidate}")
+        validate_generated_file(item, project_root, generated_root)
 
     allowed_services = set(service_names)
     for item in supplement.environment:
@@ -79,6 +73,46 @@ def load_supplement(
                 f"环境变量来源必须是项目文件：{item.path}"
             )
     return supplement
+
+
+def validate_generated_file(
+    item: GeneratedFile,
+    project_root: Path,
+    generated_root: Path,
+) -> Path:
+    project = project_root.resolve()
+    generated = generated_root.resolve()
+    candidate = _resolve_from_project(project, item.path)
+
+    if candidate.is_relative_to(generated):
+        allowed = True
+    elif candidate.parent == project:
+        allowed = _is_standard_root_file(item.kind, candidate.name)
+    else:
+        allowed = False
+
+    if not allowed:
+        raise SupplementValidationError(
+            "生成文件必须位于 "
+            f"{generated} 之下，或项目根目录下的标准 Docker 配置路径：{item.path}"
+        )
+    if not candidate.is_file():
+        raise SupplementValidationError(f"生成文件不存在：{candidate}")
+    return candidate
+
+
+def _is_standard_root_file(kind: str, name: str) -> bool:
+    if kind == "dockerfile":
+        return name == "Dockerfile" or name.startswith("Dockerfile.")
+    if kind == "compose":
+        return name in COMPOSE_NAMES or (
+            (
+                name.startswith("compose.override.")
+                or name.startswith("docker-compose.override.")
+            )
+            and Path(name).suffix in {".yaml", ".yml"}
+        )
+    return False
 
 
 def merge_supplement(

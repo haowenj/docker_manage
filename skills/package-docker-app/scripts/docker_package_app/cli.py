@@ -81,6 +81,7 @@ from docker_package_app.supplement import (
     load_supplement,
     merge_supplement,
     supplement_questions,
+    validate_generated_file,
 )
 from docker_package_app.workspace import (
     WorkPaths,
@@ -564,13 +565,8 @@ def _preload_supplement(
         supplement = ModelSupplement.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValidationError, ValueError) as exc:
         raise SupplementValidationError(f"模型补充文件无效：{exc}") from exc
-    generated = generated_root.resolve()
     for item in supplement.generated_files:
-        candidate = _resolve_project_path(project, item.path)
-        if not candidate.is_relative_to(generated) or not candidate.is_file():
-            raise SupplementValidationError(
-                f"生成文件必须存在于 {generated} 之下：{item.path}"
-            )
+        validate_generated_file(item, project, generated_root)
     return supplement
 
 
