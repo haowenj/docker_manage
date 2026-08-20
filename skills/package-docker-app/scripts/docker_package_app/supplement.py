@@ -106,10 +106,7 @@ def _is_standard_root_file(kind: str, name: str) -> bool:
         return name == "Dockerfile" or name.startswith("Dockerfile.")
     if kind == "compose":
         return name in COMPOSE_NAMES or (
-            (
-                name.startswith("compose.override.")
-                or name.startswith("docker-compose.override.")
-            )
+            name.startswith(("compose.override.", "docker-compose.override."))
             and Path(name).suffix in {".yaml", ".yml"}
         )
     return False

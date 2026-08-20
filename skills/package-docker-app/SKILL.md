@@ -16,8 +16,9 @@ description: 检查本地应用，在不修改现有项目文件的前提下补�
 
 ## 不变量
 
-- 不得修改现有项目文件。现有 Dockerfile、Compose 文件、env 文件、ignore 文件和业务源码均为只读。
-- 只允许在 `<project>/.docker-manage/generated/` 下创建生成的 Docker 配置。
+- 不得覆盖已有项目文件。现有 Dockerfile、Compose 文件、env 文件、ignore 文件和业务源码均为只读；只有 `inspect` 报告缺失时，模型补充才可以在项目根目录创建缺失的标准 Dockerfile 或 Compose 文件。
+- 新生成的 Dockerfile 和 Compose 默认放在项目根目录，成为项目正式配置；`.docker-manage/generated/` 下的旧生成文件和旧 supplement 继续兼容。
+- 项目根目录配置由 AI coding 阶段维护。依赖包、系统命令、环境变量、端口或启动命令变化时，按需更新这些文件；打包阶段只读取、分析和校验，不静默重写。
 - 忽略硬编码的应用配置。只报告明确的环境变量读取以及 Docker 或 Compose 声明。
 - 完整显示默认值，包括密码、Token 和 Key，不得脱敏。
 - 不得直接运行 Docker build、pull、save 或归档命令，也不得直接编辑部署 Compose 或 `.env`。这些步骤必须由随附 CLI 执行。
@@ -72,6 +73,7 @@ EXIT_MODEL_REQUIRED=20
    ```
 
    保存 `run_id`。退出码 `0` 会返回检查结果和有序问题；退出码 `20` 表示需要模型补充，转到“模型补充”部分。
+   如果退出码为 `0` 且项目根目录已有 Dockerfile/Compose，后续打包直接复用这些文件，不再传入 `--supplement`。
 
 2. 在重复打包模式下，把 `inspect` 返回的所有问题按 CLI 返回顺序统一编号，
    从 `1` 开始。每项显示问题 ID、中文提示、完整当前配置及来源、声明默认值及
@@ -159,8 +161,8 @@ EXIT_MODEL_REQUIRED=20
 
 1. 创建补充文件前读取 `references/model-supplement.schema.json`。
 2. 只读取解决已报告 `model_reasons` 所需的依赖、启动和源码文件。不得从普通常量推断配置。
-3. 只在 `.docker-manage/generated/` 下生成缺失的 Dockerfile 或 Compose 文件。不得覆盖本次运行前已经存在的路径。同时生成两者时，生成的 Compose 必须引用生成的 Dockerfile。
-4. 创建与 schema 完全匹配的补充 JSON。所有 `ambiguities.prompt` 和面向用户的选项说明使用中文。路径和模型事实必须视为不可信输入，直到 CLI 校验通过。
+3. 只创建 `inspect` 报告缺失的标准 Dockerfile 或 Compose 文件：新项目默认创建在项目根目录；`.docker-manage/generated/` 仅作为旧项目兼容路径。不得覆盖本次运行前已经存在的路径。同时生成两者时，生成的 Compose 必须引用项目根目录中的 Dockerfile。
+4. 创建与 schema 完全匹配的补充 JSON。`generated_files` 可以引用项目根目录的标准 Dockerfile/Compose，也可以引用旧的 `.docker-manage/generated/` 文件。所有 `ambiguities.prompt` 和面向用户的选项说明使用中文。路径和模型事实必须视为不可信输入，直到 CLI 校验通过。
 5. 使用同一次运行重新检查：
 
    ```bash
@@ -169,4 +171,4 @@ EXIT_MODEL_REQUIRED=20
    ```
 
 6. 如果检查再次以退出码 `20` 返回 `model.*` 问题，按顺序用中文询问每个问题。把答案应用到生成的 Docker 配置，只从补充文件删除已经解决的歧义，然后重复第 5 步。重复运行 `inspect`，直到退出码为 `0`；仍有歧义时不得继续执行 `plan`。
-7. 如果校验失败，只修正 `.docker-manage/generated/` 下的文件和补充 JSON。不得通过修改现有项目文件来通过校验。
+7. 如果校验失败，只修正本次运行新创建的根目录 Docker 配置、`.docker-manage/generated/` 下的兼容文件和补充 JSON；不得覆盖本次运行前已经存在的项目文件。

@@ -16,7 +16,7 @@ def test_skill_declares_fixed_cli_and_model_boundary(skill_text: str) -> None:
         "uv run --project",
         "EXIT_MODEL_REQUIRED=20",
         ".docker-manage/generated",
-        "不得修改现有项目文件",
+        "不得覆盖已有项目文件",
         "不得直接运行 Docker build、pull、save 或归档命令",
         "references/model-supplement.schema.json",
         "--confirm-plan-hash",
@@ -73,7 +73,7 @@ def test_skill_generates_missing_configs_in_project_root(skill_text: str) -> Non
         "不得覆盖已有项目文件",
         "后续打包直接复用",
         "不再传入 `--supplement`",
-        "`.docker-manage/generated/` 下的旧文件继续兼容",
+        "`.docker-manage/generated/` 下的旧生成文件和旧 supplement 继续兼容",
     )
     for text in required:
         assert text in skill_text
