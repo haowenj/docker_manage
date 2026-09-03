@@ -27,6 +27,11 @@ IGNORED_PARTS = {
     "dist",
     "build",
     "__pycache__",
+    "test",
+    "tests",
+    "__tests__",
+    "spec",
+    "specs",
 }
 ENV_INTERPOLATION = re.compile(
     r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?:(?::-|-)(.*))?\}$"
@@ -183,7 +188,7 @@ def _scan_source_tree(
         return []
     found: list[EnvCandidate] = []
     for path in sorted(source_root.rglob("*")):
-        if not path.is_file() or any(part in IGNORED_PARTS for part in path.parts):
+        if not path.is_file() or _is_ignored_source(path, source_root):
             continue
         patterns = SOURCE_PATTERNS.get(path.suffix.lower())
         if not patterns or path.stat().st_size > MAX_SOURCE_SIZE:
@@ -204,6 +209,24 @@ def _scan_source_tree(
                     default = match.group(pattern.default_group)
                 found.append(_env_candidate(service, match.group(1), source, default))
     return found
+
+
+def _is_ignored_source(path: Path, source_root: Path) -> bool:
+    relative = path.relative_to(source_root)
+    if any(part in IGNORED_PARTS for part in relative.parts):
+        return True
+
+    name = path.name.lower()
+    suffix = path.suffix.lower()
+    if suffix == ".py":
+        return name.startswith("test_") or name.endswith("_test.py")
+    if suffix in {".js", ".ts"}:
+        return name.endswith((".test.js", ".spec.js", ".test.ts", ".spec.ts"))
+    if suffix == ".go":
+        return name.endswith("_test.go")
+    if suffix == ".rb":
+        return name.endswith("_spec.rb")
+    return False
 
 
 def _scan_compose_service(

@@ -89,3 +89,62 @@ def test_compose_interpolation_outside_environment_is_collected() -> None:
 
     assert {default.value for default in by_name[("web", "WORKERS")].defaults} == {"4"}
     assert ("web", "CONFIG_PATH") in by_name
+
+
+def test_scanner_ignores_test_directories(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        'runtime = os.getenv("RUNTIME_VALUE")\n',
+        encoding="utf-8",
+    )
+    for directory, variable in (
+        ("test", "TEST_VALUE"),
+        ("tests", "TESTS_VALUE"),
+        ("__tests__", "JS_TESTS_VALUE"),
+        ("spec", "SPEC_VALUE"),
+        ("specs", "SPECS_VALUE"),
+    ):
+        test_directory = tmp_path / directory
+        test_directory.mkdir()
+        (test_directory / "test_app.py").write_text(
+            f'test_only = os.getenv("{variable}")\n',
+            encoding="utf-8",
+        )
+    compose = ComposeDocument.from_data(
+        tmp_path,
+        {"services": {"web": {"build": {"context": "."}}}},
+    )
+
+    found = scan_environment(tmp_path, {"web": tmp_path}, compose, {})
+
+    assert {(item.service, item.name) for item in found} == {
+        ("web", "RUNTIME_VALUE"),
+    }
+
+
+def test_scanner_ignores_test_named_files(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        'runtime = os.getenv("RUNTIME_VALUE")\n',
+        encoding="utf-8",
+    )
+    for filename, source in (
+        ("test_helpers.py", 'os.getenv("PYTHON_PREFIX_VALUE")\n'),
+        ("helpers_test.py", 'os.environ["PYTHON_SUFFIX_VALUE"]\n'),
+        ("app.test.js", "process.env.JS_TEST_VALUE;\n"),
+        ("app.spec.ts", "process.env.TS_SPEC_VALUE;\n"),
+        ("main_test.go", 'os.Getenv("GO_TEST_VALUE")\n'),
+        ("service_spec.rb", 'ENV["RUBY_SPEC_VALUE"]\n'),
+    ):
+        (tmp_path / filename).write_text(
+            source,
+            encoding="utf-8",
+        )
+    compose = ComposeDocument.from_data(
+        tmp_path,
+        {"services": {"web": {"build": {"context": "."}}}},
+    )
+
+    found = scan_environment(tmp_path, {"web": tmp_path}, compose, {})
+
+    assert {(item.service, item.name) for item in found} == {
+        ("web", "RUNTIME_VALUE"),
+    }
