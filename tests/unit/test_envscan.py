@@ -38,10 +38,97 @@ def test_scanner_collects_only_explicit_env_reads() -> None:
         ("web", "API_KEY"),
         ("web", "DATABASE_URL"),
         ("web", "LOG_LEVEL"),
-        ("web", "PYTHONUNBUFFERED"),
         ("worker", "CACHE_URL"),
     }
+    assert ("web", "PYTHONUNBUFFERED") not in keys
     assert ("web", "HARDCODED_URL") not in keys
+
+
+def test_dockerfile_only_env_is_not_a_deployment_candidate(tmp_path: Path) -> None:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        'FROM scratch\nENV PATH="/app/.venv/bin:${PATH}" APP_HOME=/app\n',
+        encoding="utf-8",
+    )
+    compose = ComposeDocument.from_data(
+        tmp_path,
+        {"services": {"web": {"build": {"context": "."}}}},
+    )
+
+    found = scan_environment(
+        tmp_path,
+        {"web": tmp_path},
+        compose,
+        {"web": dockerfile},
+    )
+
+    assert {(item.service, item.name) for item in found} == set()
+
+
+def test_compose_environment_keeps_explicit_value_over_dockerfile_env(
+    tmp_path: Path,
+) -> None:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "FROM scratch\nENV APP_MODE=container\n",
+        encoding="utf-8",
+    )
+    compose = ComposeDocument.from_data(
+        tmp_path,
+        {
+            "services": {
+                "web": {
+                    "build": {"context": "."},
+                    "environment": {"APP_MODE": "production"},
+                }
+            }
+        },
+    )
+
+    found = scan_environment(
+        tmp_path,
+        {"web": tmp_path},
+        compose,
+        {"web": dockerfile},
+    )
+
+    candidate = next(item for item in found if item.name == "APP_MODE")
+    assert [item.value for item in candidate.defaults] == ["production"]
+    assert all(item.path == "compose" for item in candidate.sources)
+
+
+def test_compose_env_file_keeps_explicit_path_over_dockerfile_env(
+    tmp_path: Path,
+) -> None:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "FROM scratch\nENV PATH=/image/bin:${PATH}\n",
+        encoding="utf-8",
+    )
+    env_file = tmp_path / ".env.example"
+    env_file.write_text("PATH=/deployment/bin\n", encoding="utf-8")
+    compose = ComposeDocument.from_data(
+        tmp_path,
+        {
+            "services": {
+                "web": {
+                    "build": {"context": "."},
+                    "env_file": [".env.example"],
+                }
+            }
+        },
+    )
+
+    found = scan_environment(
+        tmp_path,
+        {"web": tmp_path},
+        compose,
+        {"web": dockerfile},
+    )
+
+    candidate = next(item for item in found if item.name == "PATH")
+    assert [item.value for item in candidate.defaults] == ["/deployment/bin"]
+    assert all(item.path == ".env.example" for item in candidate.sources)
 
 
 def test_conflicting_defaults_keep_all_sources() -> None:

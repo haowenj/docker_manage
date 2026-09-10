@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shlex
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -123,8 +122,9 @@ def scan_environment(
     for service in compose.services():
         candidates.extend(_scan_compose_service(project, service, compose.service(service)))
 
-    for service, dockerfile in sorted(dockerfiles.items()):
-        candidates.extend(_scan_dockerfile_env(project, service, dockerfile.resolve()))
+    # Dockerfile ENV values belong to the image runtime by default. They only
+    # become deployment inputs when the application or Compose declares the
+    # same variable through one of the scanners above.
 
     return merge_defaults(candidates)
 
@@ -302,31 +302,6 @@ def _nested_strings(value: object) -> Iterable[str]:
     elif isinstance(value, list):
         for item in value:
             yield from _nested_strings(item)
-
-
-def _scan_dockerfile_env(
-    project_root: Path,
-    service: str,
-    dockerfile: Path,
-) -> list[EnvCandidate]:
-    found: list[EnvCandidate] = []
-    for line_number, logical_line in _dockerfile_lines(dockerfile):
-        if not logical_line.upper().startswith("ENV "):
-            continue
-        tokens = shlex.split(logical_line[4:].strip())
-        pairs: list[tuple[str, str]] = []
-        if tokens and all("=" in token for token in tokens):
-            pairs = [tuple(token.split("=", 1)) for token in tokens]
-        elif len(tokens) >= 2:
-            pairs = [(tokens[0], " ".join(tokens[1:]))]
-        source = SourceRef(
-            path=_display_path(project_root, dockerfile),
-            line=line_number,
-        )
-        for name, value in pairs:
-            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-                found.append(_env_candidate(service, name, source, value))
-    return found
 
 
 def _dockerfile_lines(path: Path) -> list[tuple[int, str]]:

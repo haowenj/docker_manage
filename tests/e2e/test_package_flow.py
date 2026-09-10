@@ -184,7 +184,7 @@ def test_successful_package_becomes_next_inspection_current_config(
 
     assert first.returncode == 0, first.stderr
     snapshot = compose_project / ".docker-manage/.env"
-    assert snapshot.read_text(encoding="utf-8") == "PORT='9123'\n"
+    assert snapshot.read_text(encoding="utf-8") == "PORT=9123\n"
     ports_snapshot = compose_project / ".docker-manage/ports.json"
     assert json.loads(ports_snapshot.read_text(encoding="utf-8"))["ports"] == [
         {
@@ -212,6 +212,109 @@ def test_successful_package_becomes_next_inspection_current_config(
     assert port_questions["port.web.8000/tcp.expose"]["default"] == "yes"
     assert port_questions["port.web.8000/tcp.host"]["default"] == "8080"
     assert "当前配置" in port_questions["port.web.8000/tcp.expose"]["prompt"]
+
+
+def test_dockerfile_path_stays_in_image_and_explicit_compose_env_is_packaged(
+    cli: CliRunner,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "path-boundary-app"
+    project.mkdir()
+    (project / "Dockerfile").write_text(
+        'FROM scratch\nENV PATH="/app/.venv/bin:${PATH}"\nEXPOSE 8000\n',
+        encoding="utf-8",
+    )
+    (project / "compose.yaml").write_text(
+        """services:
+  web:
+    build: .
+    environment:
+      APP_MODE: production
+    ports:
+      - "8080:8000"
+""",
+        encoding="utf-8",
+    )
+    current = project / ".docker-manage"
+    current.mkdir()
+    (current / ".env").write_text(
+        "PATH='/old/image/path:${PATH}'\nSTALE=remove-me\n",
+        encoding="utf-8",
+    )
+    (current / "ports.json").write_text(
+        '{"schema_version":1,"ports":[]}\n',
+        encoding="utf-8",
+    )
+
+    inspected = cli("inspect", str(project), "--json")
+
+    assert inspected.returncode == 0, inspected.stderr
+    inspected_body = json.loads(inspected.stdout)
+    assert "PATH" not in {item["name"] for item in inspected_body["env"]}
+    assert not any("PATH" in item["id"] for item in inspected_body["questions"])
+
+    answers = project / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "values": {
+                    "env.web.APP_MODE": "production",
+                    "port.web.8000/tcp.expose": "yes",
+                    "port.web.8000/tcp.host": "8080",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    answers.chmod(0o600)
+    planned = cli(
+        "plan",
+        str(project),
+        "--run-id",
+        inspected_body["run_id"],
+        "--answers",
+        str(answers),
+        "--non-interactive",
+        "--json",
+    )
+
+    assert planned.returncode == 0, planned.stderr
+    planned_body = json.loads(planned.stdout)
+    assert "PATH" not in {
+        item["container_name"] for item in planned_body["plan"]["environment"]
+    }
+    assert [item["container_name"] for item in planned_body["plan"]["environment"]] == [
+        "APP_MODE"
+    ]
+
+    packaged = cli(
+        "package",
+        str(project),
+        "--run-id",
+        inspected_body["run_id"],
+        "--answers",
+        str(answers),
+        "--confirm-plan-hash",
+        planned_body["plan_hash"],
+        "--non-interactive",
+        "--json",
+        env={"FAKE_DOCKER_INSPECT": json.dumps([_metadata("sha256:web")])},
+    )
+
+    assert packaged.returncode == 0, packaged.stderr
+    archive_path = Path(json.loads(packaged.stdout)["archive"])
+    with tarfile.open(archive_path, "r:gz") as bundle:
+        compose_text = bundle.extractfile("compose.yaml").read().decode("utf-8")
+        env_text = bundle.extractfile(".env").read().decode("utf-8")
+    assert "PATH" not in compose_text
+    assert "PATH" not in env_text
+    assert "APP_MODE" in compose_text
+    assert "APP_MODE=production\n" in env_text
+
+    snapshot_text = (current / ".env").read_text(encoding="utf-8")
+    assert "PATH" not in snapshot_text
+    assert "STALE" not in snapshot_text
+    assert "APP_MODE=production\n" in snapshot_text
 
 
 def test_legacy_snapshots_gain_mount_snapshot_after_successful_package(

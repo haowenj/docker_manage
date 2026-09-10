@@ -7,9 +7,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values
 from pydantic import Field, ValidationError
 
+from docker_package_app.envfile import serialize_environment
 from docker_package_app.errors import PackageError, UsageError
 from docker_package_app.models import (
     CurrentPortSelection,
@@ -69,7 +70,7 @@ def attach_current_values(
     if not snapshot.is_file():
         raise UsageError(f"当前环境变量快照不是普通文件：{snapshot}")
     try:
-        values = dotenv_values(snapshot)
+        values = dotenv_values(snapshot, interpolate=False)
     except OSError as exc:
         raise UsageError(f"无法读取当前环境变量快照 {snapshot}：{exc}") from exc
 
@@ -214,17 +215,10 @@ def write_current_environment(
             delete=False,
         ) as handle:
             temporary = Path(handle.name)
-        for name in sorted(values):
-            set_key(
-                temporary,
-                name,
-                values[name],
-                quote_mode="always",
-            )
-        temporary.chmod(0o600)
-        with temporary.open("rb+") as handle:
+            handle.write(serialize_environment(values))
             handle.flush()
             os.fsync(handle.fileno())
+        temporary.chmod(0o600)
         os.replace(temporary, target)
         temporary = None
         return target

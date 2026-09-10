@@ -138,6 +138,22 @@ def test_matched_key_without_value_is_rejected(tmp_path: Path) -> None:
         attach_current_values(tmp_path, (_candidate("web", "PORT"),))
 
 
+def test_current_snapshot_does_not_interpolate_dollar_values(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / ".docker-manage/.env"
+    snapshot.parent.mkdir()
+    snapshot.write_text("API_KEY=${OTHER}\n", encoding="utf-8")
+
+    attached = attach_current_values(
+        tmp_path,
+        (_candidate("web", "API_KEY"),),
+    )
+
+    assert attached[0].current is not None
+    assert attached[0].current.value == "${OTHER}"
+
+
 def test_artifact_component_matches_existing_service_prefix_rule() -> None:
     assert artifact_component("api-web") == "API_WEB"
     assert artifact_component("worker_2") == "WORKER_2"
@@ -316,10 +332,30 @@ def test_write_current_environment_is_complete_sorted_and_private(
     assert path == tmp_path / ".docker-manage/.env"
     assert dotenv_values(path) == {"API_KEY": "secret", "PORT": "8322"}
     assert path.read_text(encoding="utf-8").splitlines() == [
-        "API_KEY='secret'",
-        "PORT='8322'",
+        "API_KEY=secret",
+        "PORT=8322",
     ]
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_write_current_environment_keeps_docker_envfile_values_unquoted(
+    tmp_path: Path,
+) -> None:
+    path = write_current_environment(
+        tmp_path,
+        (
+            EnvAssignment(
+                service="web",
+                container_name="API_KEY",
+                artifact_name="API_KEY",
+                value="token-${OTHER} with spaces:中文!$?",
+            ),
+        ),
+    )
+
+    assert path.read_text(encoding="utf-8") == (
+        "API_KEY=token-${OTHER} with spaces:中文!$?\n"
+    )
 
 
 def test_write_current_ports_is_complete_sorted_and_private(

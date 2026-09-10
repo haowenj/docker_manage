@@ -33,6 +33,18 @@ class RecordingRunner:
         return CommandResult(command, 0, self.stdout, self.stderr)
 
 
+class ReadingEnvRunner(RecordingRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.validation_env = ""
+
+    def run(self, argv, **kwargs):
+        command = list(argv)
+        env_path = Path(command[command.index("--env-file") + 1])
+        self.validation_env = env_path.read_text(encoding="utf-8")
+        return super().run(argv, **kwargs)
+
+
 def _plan(root: Path) -> PackagePlan:
     return PackagePlan(
         run_id="run-1",
@@ -182,8 +194,8 @@ def test_write_and_validate_deployment(tmp_path: Path) -> None:
     assert compose_path.stat().st_mode & 0o777 == 0o600
     assert env_path.stat().st_mode & 0o777 == 0o600
     assert env_path.read_text(encoding="utf-8").splitlines() == [
-        "WEB_API_KEY='a b#c'",
-        "WEB_PORT='8000'",
+        "WEB_API_KEY=a b#c",
+        "WEB_PORT=8000",
     ]
     assert runner.calls == [
         [
@@ -198,10 +210,83 @@ def test_write_and_validate_deployment(tmp_path: Path) -> None:
     ]
 
 
+def test_validation_escapes_dollar_values_only_in_temporary_env_file(
+    tmp_path: Path,
+) -> None:
+    _, env_path = write_deployment(
+        {"services": {}},
+        {"API_KEY": "token-${OTHER}"},
+        tmp_path / "payload",
+    )
+    runner = ReadingEnvRunner()
+
+    validate_deployment(tmp_path / "compose.yaml", env_path, runner)
+
+    assert runner.validation_env == "API_KEY=token-$${OTHER}\n"
+    assert not any(
+        path.name.startswith(f".{env_path.name}.validate.")
+        for path in env_path.parent.iterdir()
+    )
+
+
+def test_render_uses_literal_value_when_env_file_would_interpolate(
+    tmp_path: Path,
+) -> None:
+    unsafe_value = 'token-${OTHER} "quoted"'
+    plan = _plan(tmp_path).model_copy(
+        update={
+            "environment": (
+                EnvAssignment(
+                    service="web",
+                    container_name="API_KEY",
+                    artifact_name="WEB_API_KEY",
+                    value=unsafe_value,
+                ),
+            )
+        }
+    )
+
+    rendered = render_deployment(_base(tmp_path), plan, {})
+
+    assert rendered["services"]["web"]["environment"] == {
+        "API_KEY": unsafe_value.replace("$", "$$"),
+    }
+
+
+def test_write_deployment_keeps_docker_envfile_values_unquoted(
+    tmp_path: Path,
+) -> None:
+    values = {
+        "WITH_SPACE": "a b#c",
+        "WITH_COLON": "https://example.invalid:8443/api",
+        "WITH_CHINESE": "中文 值",
+        "WITH_SPECIAL": "!$?&=;",
+        "WITH_INTERPOLATION": "${OTHER}",
+        "WITH_QUOTE": "it's",
+    }
+
+    _, env_path = write_deployment(
+        {"services": {}},
+        values,
+        tmp_path / "payload",
+    )
+
+    assert env_path.read_text(encoding="utf-8").splitlines() == [
+        "WITH_CHINESE=中文 值",
+        "WITH_COLON=https://example.invalid:8443/api",
+        "WITH_INTERPOLATION=${OTHER}",
+        "WITH_QUOTE=it's",
+        "WITH_SPACE=a b#c",
+        "WITH_SPECIAL=!$?&=;",
+    ]
+
+
 def test_validation_rejects_unset_variable_warning(tmp_path: Path) -> None:
     runner = RecordingRunner(
         stderr='The "MISSING" variable is not set. Defaulting to a blank string.\n'
     )
+    env_path = tmp_path / ".env"
+    env_path.write_text("", encoding="utf-8")
 
     with pytest.raises(PackageError, match="未设置的变量"):
-        validate_deployment(tmp_path / "compose.yaml", tmp_path / ".env", runner)
+        validate_deployment(tmp_path / "compose.yaml", env_path, runner)

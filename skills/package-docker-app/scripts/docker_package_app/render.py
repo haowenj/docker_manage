@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import copy
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import yaml
-from dotenv import set_key
 
 from docker_package_app.command import CommandRunner
 from docker_package_app.compose import ComposeDocument
+from docker_package_app.envfile import compose_environment_value, write_environment_file
 from docker_package_app.errors import PackageError
 from docker_package_app.files import FileRewriteKey
 from docker_package_app.models import PackagePlan
@@ -26,7 +27,7 @@ def render_deployment(
     environment_by_service: dict[str, dict[str, str]] = {}
     for item in plan.environment:
         environment_by_service.setdefault(item.service, {})[item.container_name] = (
-            f"${{{item.artifact_name}}}"
+            compose_environment_value(item.artifact_name, item.value)
         )
     ports_by_service: dict[str, list[dict[str, Any]]] = {}
     for item in plan.ports:
@@ -116,15 +117,7 @@ def write_deployment(
     )
     compose_path.chmod(0o600)
 
-    env_path.write_text("", encoding="utf-8")
-    env_path.chmod(0o600)
-    for name in sorted(env_values):
-        set_key(
-            env_path,
-            name,
-            env_values[name],
-            quote_mode="always",
-        )
+    write_environment_file(env_path, env_values)
     env_path.chmod(0o600)
     return compose_path, env_path
 
@@ -134,24 +127,46 @@ def validate_deployment(
     env_path: Path,
     runner: CommandRunner,
 ) -> None:
-    result = runner.run(
-        [
-            "docker",
-            "compose",
-            "--env-file",
-            str(env_path),
-            "-f",
-            str(compose_path),
-            "config",
-        ]
-    )
-    output = f"{result.stdout}\n{result.stderr}".lower()
-    if "variable is not set" in output:
-        raise PackageError(
-            "部署 Compose 校验发现未设置的变量",
-            hint="请把缺失变量加入生成的部署环境变量文件。",
-            details=(result.stderr or result.stdout).strip(),
+    temporary: Path | None = None
+    try:
+        validation_env_path = env_path
+        raw_env = env_path.read_text(encoding="utf-8")
+        if "$" in raw_env:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=env_path.parent,
+                prefix=f".{env_path.name}.validate.",
+                delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                handle.write(raw_env.replace("$", "$$"))
+            temporary.chmod(0o600)
+            validation_env_path = temporary
+
+        result = runner.run(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                str(validation_env_path),
+                "-f",
+                str(compose_path),
+                "config",
+            ]
         )
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        if "variable is not set" in output:
+            raise PackageError(
+                "部署 Compose 校验发现未设置的变量",
+                hint="请把缺失变量加入生成的部署环境变量文件。",
+                details=(result.stderr or result.stdout).strip(),
+            )
+    except OSError as exc:
+        raise PackageError(f"无法读取部署环境变量文件 {env_path}：{exc}") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _rewrite_service_volumes(
