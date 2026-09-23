@@ -21,6 +21,7 @@ from docker_package_app.command import CommandRunner
 from docker_package_app.compose import ComposeDocument
 from docker_package_app.current_config import (
     CURRENT_MOUNTS_RELATIVE,
+    attach_current_images,
     attach_current_mounts,
     attach_current_ports,
     attach_current_values,
@@ -374,6 +375,7 @@ def _perform_inspect(
         update={
             "env": attach_current_values(project, inspection.env),
             "ports": attach_current_ports(project, inspection.ports),
+            "images": attach_current_images(project, inspection.images),
         }
     )
     current_files = inspection.files
@@ -537,6 +539,7 @@ def _perform_package(args: argparse.Namespace, paths: WorkPaths) -> dict[str, An
         plan.environment,
         plan.ports,
         plan.files,
+        plan.images,
     )
     state = _transition(state, Stage.PACKAGED, archive=str(archive))
     atomic_write_model(paths.state, state)

@@ -5,9 +5,11 @@ from pathlib import Path
 import pytest
 from docker_package_app.current_config import (
     CURRENT_ENV_SOURCE,
+    CURRENT_IMAGES_RELATIVE,
     CURRENT_MOUNTS_RELATIVE,
     CURRENT_PORTS_RELATIVE,
     artifact_component,
+    attach_current_images,
     attach_current_mounts,
     attach_current_ports,
     attach_current_values,
@@ -24,6 +26,7 @@ from docker_package_app.models import (
     FileAction,
     FileAssignment,
     FileCandidate,
+    ImageCandidate,
     PortAssignment,
     PortCandidate,
     SourceRef,
@@ -166,6 +169,68 @@ def test_missing_mount_snapshot_preserves_file_candidates(tmp_path: Path) -> Non
 
     assert attached == candidates
     assert attached[0].current_action is None
+
+
+def test_image_snapshot_is_ignored_after_original_image_changes(tmp_path: Path) -> None:
+    snapshot = tmp_path / CURRENT_IMAGES_RELATIVE
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "images": [{
+                "service": "db",
+                "original_image": "postgres:16",
+                "decision": "registry.intra/postgres:16",
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    attached = attach_current_images(
+        tmp_path,
+        (ImageCandidate(service="db", image="postgres:17"),),
+    )
+
+    assert attached[0].current_decision is None
+
+
+def test_image_snapshot_matches_uninterpolated_compose_image(tmp_path: Path) -> None:
+    snapshot = tmp_path / CURRENT_IMAGES_RELATIVE
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "images": [{
+                "service": "db",
+                "original_image": "${DB_IMAGE}",
+                "decision": "registry.intra/postgres:16",
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    attached = attach_current_images(
+        tmp_path,
+        (ImageCandidate(service="db", image="${DB_IMAGE}"),),
+    )
+
+    assert attached[0].current_decision == "registry.intra/postgres:16"
+
+
+def test_invalid_image_snapshot_stops_inspection(tmp_path: Path) -> None:
+    snapshot = tmp_path / CURRENT_IMAGES_RELATIVE
+    snapshot.parent.mkdir()
+    snapshot.write_text(
+        '{"schema_version":1,"images":[{"service":"db",'
+        '"original_image":"postgres:16","decision":"not valid image"}]}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(UsageError, match="当前镜像快照无效"):
+        attach_current_images(
+            tmp_path,
+            (ImageCandidate(service="db", image="postgres:16"),),
+        )
 
 
 def test_attach_current_mounts_matches_paths_and_ignores_stale_entries(
@@ -606,3 +671,34 @@ def test_configuration_write_removes_new_mount_snapshot_on_failure(
         write_current_configuration(tmp_path, (), (), ())
 
     assert not mounts_path.exists()
+
+
+def test_configuration_write_restores_all_snapshots_when_images_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = tmp_path / ".docker-manage"
+    current.mkdir()
+    previous = {
+        current / ".env": "PORT='last-good'\n",
+        current / "ports.json": '{"schema_version":1,"ports":[]}\n',
+        current / "mounts.json": '{"schema_version":1,"mounts":[]}\n',
+        current / "images.json": '{"schema_version":1,"images":[]}\n',
+    }
+    for path, body in previous.items():
+        path.write_text(body, encoding="utf-8")
+
+    def write_then_fail(root: Path, _images: object) -> Path:
+        target = root / CURRENT_IMAGES_RELATIVE
+        target.write_text("partial", encoding="utf-8")
+        raise PackageError("images failed")
+
+    monkeypatch.setattr(
+        "docker_package_app.current_config.write_current_images",
+        write_then_fail,
+    )
+
+    with pytest.raises(PackageError, match="images failed"):
+        write_current_configuration(tmp_path, (), (), (), ())
+
+    assert {path: path.read_text(encoding="utf-8") for path in previous} == previous

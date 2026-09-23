@@ -13,6 +13,7 @@ from pydantic import Field, ValidationError
 from docker_package_app.envfile import serialize_environment
 from docker_package_app.errors import PackageError, UsageError
 from docker_package_app.models import (
+    IMAGE_PATTERN,
     CurrentPortSelection,
     DefaultValue,
     EnvAssignment,
@@ -20,6 +21,9 @@ from docker_package_app.models import (
     FileAction,
     FileAssignment,
     FileCandidate,
+    ImageAction,
+    ImageAssignment,
+    ImageCandidate,
     PortAssignment,
     PortCandidate,
     SourceRef,
@@ -31,6 +35,8 @@ CURRENT_ENV_SOURCE = CURRENT_ENV_RELATIVE.as_posix()
 CURRENT_PORTS_RELATIVE = Path(".docker-manage/ports.json")
 CURRENT_MOUNTS_RELATIVE = Path(".docker-manage/mounts.json")
 CURRENT_MOUNTS_SOURCE = CURRENT_MOUNTS_RELATIVE.as_posix()
+CURRENT_IMAGES_RELATIVE = Path(".docker-manage/images.json")
+CURRENT_IMAGES_SOURCE = CURRENT_IMAGES_RELATIVE.as_posix()
 
 
 class _PortSnapshotEntry(StrictModel):
@@ -54,6 +60,55 @@ class _MountSnapshotEntry(StrictModel):
 class _MountSnapshot(StrictModel):
     schema_version: Literal[1] = 1
     mounts: tuple[_MountSnapshotEntry, ...] = ()
+
+
+class _ImageSnapshotEntry(StrictModel):
+    service: str
+    original_image: str
+    decision: str
+
+
+class _ImageSnapshot(StrictModel):
+    schema_version: Literal[1] = 1
+    images: tuple[_ImageSnapshotEntry, ...] = ()
+
+
+def attach_current_images(
+    project_root: Path,
+    candidates: Sequence[ImageCandidate],
+) -> tuple[ImageCandidate, ...]:
+    snapshot = project_root.resolve() / CURRENT_IMAGES_RELATIVE
+    if not snapshot.exists():
+        return tuple(candidates)
+    if not snapshot.is_file():
+        raise UsageError(f"当前镜像快照不是普通文件：{snapshot}")
+    try:
+        stored = _ImageSnapshot.model_validate_json(snapshot.read_text(encoding="utf-8"))
+        selections: dict[str, _ImageSnapshotEntry] = {}
+        for entry in stored.images:
+            if (
+                entry.service in selections
+                or not entry.service
+                or not entry.original_image
+                or (
+                    entry.decision != "打包"
+                    and not IMAGE_PATTERN.fullmatch(entry.decision)
+                )
+            ):
+                raise ValueError(f"镜像配置无效或服务重复：{entry.service}")
+            selections[entry.service] = entry
+    except (OSError, UnicodeError, ValidationError, ValueError) as exc:
+        raise UsageError(f"当前镜像快照无效 {snapshot}：{exc}") from exc
+
+    return tuple(
+        candidate.model_copy(update={"current_decision": entry.decision})
+        if not candidate.has_build
+        and candidate.image is not None
+        and (entry := selections.get(candidate.service)) is not None
+        and entry.original_image == candidate.image
+        else candidate
+        for candidate in candidates
+    )
 
 
 def artifact_component(value: str) -> str:
@@ -281,6 +336,26 @@ def write_current_mounts(
     return _atomic_write_snapshot(target, body)
 
 
+def write_current_images(
+    project_root: Path,
+    assignments: Sequence[ImageAssignment],
+) -> Path:
+    target = project_root.resolve() / CURRENT_IMAGES_RELATIVE
+    entries = tuple(
+        _ImageSnapshotEntry(
+            service=item.service,
+            original_image=item.original_image or "",
+            decision=(
+                item.final_image if item.action is ImageAction.REUSE else "打包"
+            ),
+        )
+        for item in sorted(assignments, key=lambda value: value.service)
+        if item.action is not ImageAction.BUILD
+    )
+    body = _ImageSnapshot(images=entries).model_dump_json(indent=2) + "\n"
+    return _atomic_write_snapshot(target, body)
+
+
 def _atomic_write_snapshot(target: Path, body: str) -> Path:
     temporary: Path | None = None
     try:
@@ -313,12 +388,14 @@ def write_current_configuration(
     environment: Sequence[EnvAssignment],
     ports: Sequence[PortAssignment],
     files: Sequence[FileAssignment] = (),
-) -> tuple[Path, Path, Path]:
+    images: Sequence[ImageAssignment] = (),
+) -> tuple[Path, Path, Path, Path]:
     root = project_root.resolve()
     targets = (
         root / CURRENT_ENV_RELATIVE,
         root / CURRENT_PORTS_RELATIVE,
         root / CURRENT_MOUNTS_RELATIVE,
+        root / CURRENT_IMAGES_RELATIVE,
     )
     previous: dict[Path, tuple[bytes | None, int | None]] = {}
     try:
@@ -337,7 +414,8 @@ def write_current_configuration(
         env_path = write_current_environment(root, environment)
         ports_path = write_current_ports(root, ports)
         mounts_path = write_current_mounts(root, files)
-        return env_path, ports_path, mounts_path
+        images_path = write_current_images(root, images)
+        return env_path, ports_path, mounts_path, images_path
     except PackageError as original:
         failures: list[str] = []
         for target, (body, mode) in previous.items():

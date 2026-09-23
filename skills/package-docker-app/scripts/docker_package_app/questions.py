@@ -4,7 +4,10 @@ from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
-from docker_package_app.current_config import CURRENT_MOUNTS_SOURCE
+from docker_package_app.current_config import (
+    CURRENT_IMAGES_SOURCE,
+    CURRENT_MOUNTS_SOURCE,
+)
 from docker_package_app.errors import AnswerRequired, PlanValidationError
 from docker_package_app.models import FileCandidate, Inspection, Question
 
@@ -111,17 +114,23 @@ def build_questions(inspection: Inspection) -> tuple[Question, ...]:
     for image in sorted(inspection.images, key=lambda item: item.service):
         if image.has_build:
             continue
+        current_text = (
+            f"当前配置值：{image.current_decision}，来源：{CURRENT_IMAGES_SOURCE}。"
+            if image.current_decision is not None
+            else ""
+        )
         questions.append(
             Question(
                 id=f"image.{image.service}.decision",
                 kind="image",
                 prompt=(
                     f"【重要】检测到第三方镜像：服务 {image.service} 使用 {image.image}。"
+                    f"{current_text}"
                     "请确认处理方式：在 Docker Manage 中检查并粘贴可复用的镜像引用，"
                     "或输入“打包”以拉取并包含原始镜像。"
                     "【注意】输入“打包”会将该镜像写入离线部署包。"
                 ),
-                default="打包",
+                default=image.current_decision or "打包",
             )
         )
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from docker_package_app.current_config import artifact_component
 from docker_package_app.errors import AnswerRequired, PlanValidationError, UsageError
 from docker_package_app.models import (
+    IMAGE_PATTERN,
     AnswerBook,
     BuildArgAssignment,
     DiskEstimate,
@@ -26,12 +27,6 @@ from docker_package_app.questions import _file_question_id, build_questions
 PLATFORM_PATTERN = re.compile(r"^linux/[a-z0-9_]+(?:/[a-z0-9_]+)?$")
 NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 TAG_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
-IMAGE_PATTERN = re.compile(
-    r"^(?:[a-z0-9.-]+(?::[0-9]+)?/)?"
-    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
-    r"(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?"
-    r"(?:@sha256:[a-f0-9]{64})?$"
-)
 COMPOSE_VARIABLE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)")
 
 

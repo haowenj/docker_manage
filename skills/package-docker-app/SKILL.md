@@ -27,7 +27,9 @@ description: 检查本地应用，在不修改现有项目文件的前提下补�
 - `<project>/.docker-manage/ports.json` 表示最近一次完整成功打包使用的项目级当前端口配置；不得从历史 `state.json` 推断当前端口。
 - 模型不得直接编辑 `.docker-manage/ports.json`。只有随附 CLI 可以在完整成功打包后与 `.env` 一起更新该文件。
 - `<project>/.docker-manage/mounts.json` 表示最近一次完整成功打包使用的 bind mount 决策；不得从历史 `state.json`、旧答案、manifest 或归档推断当前挂载决策。
-- 模型不得直接编辑 `.docker-manage/mounts.json`。只有随附 CLI 可以在完整成功打包后与 `.env`、`ports.json` 一起更新三份当前配置快照。
+- 模型不得直接编辑 `.docker-manage/mounts.json`。只有随附 CLI 可以在完整成功打包后更新当前配置快照。
+- `<project>/.docker-manage/images.json` 表示最近一次完整成功打包使用的第三方镜像处理决定，包括要打包的原始镜像和要复用的服务器镜像引用；不得从历史 `state.json`、旧答案、manifest 或归档推断当前镜像决定。
+- 模型不得直接编辑 `.docker-manage/images.json`。只有随附 CLI 可以在完整成功打包后与其他当前配置快照一起更新该文件。只有服务名和原始镜像引用都未变化时，才沿用上次决定。
 - 复制进归档的 bind mount 副本递归设置权限：目录权限为 `0777`，普通文件权限为 `0666`。不得跟随符号链接，不得修改原项目文件权限、Compose `configs`、`secrets` 或保留的服务器路径权限。
 - 每个 bind mount 都必须在计划前明确决定：项目内路径可选 `copy`（复制本机内容）、`keep_server_path`（保留服务器现有路径）或 `abort`（中止）；项目外路径只允许 `keep_server_path` 或 `abort`。项目内 bind 默认值为 `keep_server_path`，但答案文件仍必须包含最终决定。
 - 选择 `keep_server_path` 时，本机 source 及其内容不得进入归档。项目内 bind 的部署 Compose 必须继续使用与 `copy` 相同的稳定部署路径 `./files/<项目相对路径>`；项目外 bind 保留原始 source。部署 Compose、manifest 和结果输出不得包含开发电脑的绝对路径，包括 Docker Compose 自动解析出的路径。CLI 不得创建、清空、修改该服务器路径或改变其权限。普通覆盖式重复解压不会覆盖归档中不存在的保留路径。
@@ -65,6 +67,8 @@ EXIT_MODEL_REQUIRED=20
    `.docker-manage/mounts.json` 不参与模式判定：旧项目缺少挂载快照时继续进入
    重复打包模式，bind mount 使用下述通用安全默认值；本次完整成功后由 CLI 自动
    补齐。挂载快照存在但不是普通文件或内容无效时，按 `inspect` 的 CLI 错误停止。
+   `.docker-manage/images.json` 也不参与模式判定：旧项目缺少镜像快照时继续打包，
+   第三方镜像使用声明默认值 `打包`；快照无效时按 `inspect` 的 CLI 错误停止。
 
    运行：
 
@@ -78,7 +82,9 @@ EXIT_MODEL_REQUIRED=20
 2. 在重复打包模式下，把 `inspect` 返回的所有问题按 CLI 返回顺序统一编号，
    从 `1` 开始。每项显示问题 ID、中文提示、完整当前配置及来源、声明默认值及
    来源、最终默认答案、机器选项和中文含义。第三方镜像继续显示醒目的
-   `【重要】` 警告；bind mount 继续显示使用服务、原始 source、解析路径、
+   `【重要】` 警告，并显示上次镜像决定及来源。服务名与原始镜像引用未变化时，
+   上次的复用引用或 `打包` 是最终默认答案；缺少镜像快照、新增服务或原始镜像引用
+   变化时，最终默认答案为 `打包`，不得声称来自上次打包。bind mount 继续显示使用服务、原始 source、解析路径、
    项目内外位置、估算大小、稳定部署路径、当前挂载决策及来源、通用声明默认值、
    最终默认答案和归档行为。上次选择 `copy` 时最终默认答案仍为 `copy`；
    上次选择 `keep_server_path` 时最终默认答案仍为 `keep_server_path`。缺少挂载快照、新增
@@ -115,7 +121,7 @@ EXIT_MODEL_REQUIRED=20
 
    对每个 bind mount 显示使用服务、原始 source、解析路径、项目内外位置、估算大小、稳定部署路径、完整默认值和中文选项含义。项目内路径接受 `copy`、`keep_server_path`、`abort`；项目外路径接受 `keep_server_path`、`abort`。明确说明项目内 bind 的 `copy` 与 `keep_server_path` 只决定本次归档是否携带内容，两者生成的 Compose 都挂载同一个 `./files/` 地址。不得根据 `data`、`uploads` 等目录名自动猜测。
 
-5. 在首次打包模式下，对每个第三方镜像问题暂停，使用醒目的 `【重要】` 提醒检测到第三方镜像，等待用户检查 Docker Manage。用户粘贴服务器镜像引用时保存该引用以供复用；用户回答精确值 `打包` 时保留、拉取并包含原始镜像名。不得替用户选择。
+5. 在首次打包模式下，对每个第三方镜像问题暂停，使用醒目的 `【重要】` 提醒检测到第三方镜像，等待用户检查 Docker Manage。用户粘贴服务器镜像引用时使用该引用，并在完整成功打包后由 CLI 保存为下次默认值；用户回答精确值 `打包` 时保留、拉取并包含原始镜像名。不得替用户选择。
 
 6. 创建权限为 `0600` 的私有答案 JSON 文件，格式保持机器协议不变：
 
@@ -151,7 +157,7 @@ EXIT_MODEL_REQUIRED=20
 
    不得替换为重新计算或编辑后的哈希。CLI 会在任何 Docker 变更之前拒绝已改变的计划。
 
-   CLI 只有完整成功打包后才会一起更新 `.docker-manage/.env`、`.docker-manage/ports.json` 和 `.docker-manage/mounts.json`。任一快照写入失败时必须恢复三者的旧状态。`inspect`、`plan`、`--dry-run`、等待模型补充和失败任务不得改变当前环境变量、当前端口或当前挂载决策快照。
+   CLI 只有完整成功打包后才会一起更新 `.docker-manage/.env`、`.docker-manage/ports.json`、`.docker-manage/mounts.json` 和 `.docker-manage/images.json`。任一快照写入失败时必须恢复四者的旧状态。`inspect`、`plan`、`--dry-run`、等待模型补充和失败任务不得改变当前环境变量、当前端口、当前挂载决策或当前镜像决定快照。
 
 10. 用中文报告最终归档路径、大小、SHA-256、已打包镜像列表、复用的服务器镜像列表和服务器所需路径。
 

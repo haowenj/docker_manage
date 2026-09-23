@@ -70,6 +70,22 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
     ]
     assert output["reused_images"] == ["registry.intra/redis:7-approved"]
     assert output["server_paths"] == ["./files/data"]
+    images_snapshot = project / ".docker-manage/images.json"
+    assert json.loads(images_snapshot.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "images": [
+            {
+                "service": "helper",
+                "original_image": "busybox:1.36",
+                "decision": "打包",
+            },
+            {
+                "service": "redis",
+                "original_image": "redis:7",
+                "decision": "registry.intra/redis:7-approved",
+            },
+        ],
+    }
     mounts_snapshot = project / ".docker-manage/mounts.json"
     assert json.loads(mounts_snapshot.read_text(encoding="utf-8")) == {
         "schema_version": 1,
@@ -100,6 +116,11 @@ def test_multi_service_package_is_complete(cli: CliRunner, tmp_path: Path) -> No
     assert data_question["default"] == "keep_server_path"
     assert ".docker-manage/mounts.json" in config_question["prompt"]
     assert ".docker-manage/mounts.json" in data_question["prompt"]
+    assert questions["image.redis.decision"]["default"] == (
+        "registry.intra/redis:7-approved"
+    )
+    assert ".docker-manage/images.json" in questions["image.redis.decision"]["prompt"]
+    assert questions["image.helper.decision"]["default"] == "打包"
 
     with tarfile.open(archive_path, "r:gz") as bundle:
         compose = yaml.safe_load(bundle.extractfile("compose.yaml"))

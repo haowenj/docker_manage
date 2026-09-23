@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+IMAGE_PATTERN = re.compile(
+    r"^(?:[a-z0-9.-]+(?::[0-9]+)?/)?"
+    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?"
+    r"(?:@sha256:[a-f0-9]{64})?$"
+)
 
 
 class StrictModel(BaseModel):
@@ -84,6 +92,7 @@ class ImageCandidate(StrictModel):
     service: str
     image: str | None = None
     has_build: bool = False
+    current_decision: str | None = None
 
 
 class FileCandidate(StrictModel):
