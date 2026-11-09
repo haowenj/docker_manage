@@ -1,6 +1,6 @@
 ---
 name: package-docker-app
-description: 检查本地应用，在不修改现有项目文件的前提下补充缺失的 Dockerfile 或 Compose 配置，收集环境变量与端口，构建指定平台镜像，并生成经过验证的 Docker Manage 离线部署归档。适用于用户要求打包、导出或准备本地 Docker 或 Docker Compose 应用并传输到离线服务器的场景。
+description: 检查本地应用，在不修改现有项目文件的前提下补充缺失的 Dockerfile 或 Compose 配置，收集环境变量与端口，构建指定平台镜像，生成经过验证的 Docker Manage 离线部署归档，并可上传到 Docker Manage 服务。适用于用户要求打包、导出、准备本地 Docker 或 Docker Compose 应用，或在内网直接上传并发布部署包的场景。
 ---
 
 # 打包 Docker 应用
@@ -160,6 +160,24 @@ EXIT_MODEL_REQUIRED=20
    CLI 只有完整成功打包后才会一起更新 `.docker-manage/.env`、`.docker-manage/ports.json`、`.docker-manage/mounts.json` 和 `.docker-manage/images.json`。任一快照写入失败时必须恢复四者的旧状态。`inspect`、`plan`、`--dry-run`、等待模型补充和失败任务不得改变当前环境变量、当前端口、当前挂载决策或当前镜像决定快照。
 
 10. 用中文报告最终归档路径、大小、SHA-256、已打包镜像列表、复用的服务器镜像列表和服务器所需路径。
+
+11. 如果用户要求上传到 Docker Manage，或环境变量 `DOCKER_MANAGE_SERVER_URL` 已设置，把上一步返回的归档路径作为 `ARCHIVE` 执行上传。服务地址优先使用用户本次给出的值，其次使用环境变量；两者都没有时只询问一次，不得猜测或写死地址。
+
+    默认只上传并停在待审核状态，发布仍由用户在 Docker Manage 页面确认：
+
+    ```bash
+    uv run --project "$SKILL_DIR" docker-package-app publish "$ARCHIVE" \
+      --server-url "$SERVER_URL" --json
+    ```
+
+    只有用户明确要求打包后直接发布时，才增加 `--deploy`。该选项会上传后立即调用部署接口，并轮询到 `deployed` 或失败：
+
+    ```bash
+    uv run --project "$SKILL_DIR" docker-package-app publish "$ARCHIVE" \
+      --server-url "$SERVER_URL" --deploy --json
+    ```
+
+    成功后用中文报告 `task_id`、任务状态和服务内任务链接 `task_url`。默认上传模式必须说明任务处于待审核状态，不能声称已经发布。上传或部署失败时报告 CLI 返回的 HTTP 错误、任务错误和命令输出，不得忽略失败继续宣称成功。
 
 ## 模型补充
 

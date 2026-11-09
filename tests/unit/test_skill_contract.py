@@ -154,3 +154,15 @@ def test_skill_reuses_current_mount_decision_snapshot(skill_text: str) -> None:
     )
     for text in required:
         assert text in skill_text
+
+
+def test_skill_supports_optional_docker_manage_publish(skill_text: str) -> None:
+    required = (
+        "docker-package-app publish",
+        "DOCKER_MANAGE_SERVER_URL",
+        "--deploy",
+        "待审核",
+        "task_url",
+    )
+    for text in required:
+        assert text in skill_text

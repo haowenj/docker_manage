@@ -48,3 +48,7 @@ class SupplementValidationError(PackageError):
 class ArtifactVerificationError(PackageError):
     pass
 
+
+class PublishError(PackageError):
+    pass
+

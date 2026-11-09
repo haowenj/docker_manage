@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from collections.abc import Mapping, Sequence
@@ -64,6 +65,7 @@ from docker_package_app.planning import (
     compose_current_file_environment,
     compose_file_environment,
 )
+from docker_package_app.publish import publish_archive
 from docker_package_app.questions import (
     NO_ENV_OVERRIDES,
     build_questions,
@@ -165,7 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = ChineseArgumentParser(
         prog="docker-package-app",
-        description="检查本地应用并生成可导入 Docker Manage 的离线部署包。",
+        description="检查本地应用、生成离线部署包，并上传到 Docker Manage。",
     )
     subparsers = parser.add_subparsers(
         dest="command",
@@ -192,6 +194,27 @@ def _build_parser() -> argparse.ArgumentParser:
             child.add_argument("--confirm-plan-hash", help="确认执行的计划哈希")
         if command == "run":
             child.add_argument("--dry-run", action="store_true", help="只生成计划，不执行打包")
+    publish = subparsers.add_parser(
+        "publish",
+        help="上传归档到 Docker Manage",
+        description="上传已有离线归档到 Docker Manage，并可选执行部署。",
+    )
+    publish.add_argument("archive", type=Path, help="待上传的 .tar.gz 归档")
+    publish.add_argument(
+        "--server-url",
+        default=os.environ.get("DOCKER_MANAGE_SERVER_URL"),
+        help="Docker Manage 服务地址，也可通过 DOCKER_MANAGE_SERVER_URL 设置",
+    )
+    publish.add_argument("--deploy", action="store_true", help="上传后立即部署并等待结果")
+    publish.add_argument("--timeout", type=float, default=1800.0, help="单次 HTTP 请求超时秒数")
+    publish.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=1800.0,
+        help="等待部署完成的总超时秒数",
+    )
+    publish.add_argument("--poll-interval", type=float, default=2.0, help="部署状态轮询间隔秒数")
+    publish.add_argument("--json", action="store_true", help="输出紧凑 JSON")
     return parser
 
 
@@ -215,6 +238,8 @@ def _add_shared_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _dispatch(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int]:
+    if args.command == "publish":
+        return _perform_publish(args), EXIT_OK
     project = args.project.resolve()
     if args.command == "inspect":
         paths = _paths(project, args.run_id or uuid4().hex)
@@ -253,6 +278,17 @@ def _dispatch(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int]:
             if not args.keep_work and not preserve:
                 cleanup_run(paths)
     raise UsageError(f"未知命令：{args.command}")
+
+
+def _perform_publish(args: argparse.Namespace) -> dict[str, Any]:
+    return publish_archive(
+        args.archive,
+        args.server_url,
+        deploy=args.deploy,
+        timeout=args.timeout,
+        wait_timeout=args.wait_timeout,
+        poll_interval=args.poll_interval,
+    )
 
 
 def _perform_inspect(
